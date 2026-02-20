@@ -62,8 +62,8 @@ export class AgentLoop {
     log.info("Step 2: Fetching portfolio...");
     let portfolio = await this.chains[0].getBalance();
 
-    // 3. ANALYZE: Send to Claude
-    log.info("Step 3: Analyzing with Claude...");
+    // 3. ANALYZE: Send to configured LLM
+    log.info("Step 3: Analyzing with LLM...");
     const analysis = await analyzeMarket(
       snapshot,
       portfolio,

@@ -19,6 +19,11 @@ export const config = {
     model: process.env.OPENAI_MODEL ?? "gpt-5.2",
     reasoningEffort: (process.env.OPENAI_REASONING_EFFORT ?? "medium") as ReasoningEffort,
   },
+  jupiter: {
+    apiKey: process.env.JUPITER_API_KEY ?? "",
+    baseUrl: process.env.JUPITER_API_BASE_URL
+      ?? (process.env.JUPITER_API_KEY ? "https://api.jup.ag" : "https://lite-api.jup.ag"),
+  },
   birdeye: {
     apiKey: process.env.BIRDEYE_API_KEY ?? "",
   },

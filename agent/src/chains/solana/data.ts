@@ -1,24 +1,59 @@
 import { getConnection, getPublicKey, SOL_MINT } from "./wallet.js";
 import { createLogger } from "../../utils/logger.js";
+import { config } from "../../config/index.js";
 import type { PortfolioBalance } from "../types.js";
 
 const log = createLogger("solana:data");
 
-const SOL_PRICE_API = "https://api.jup.ag/price/v2?ids=So11111111111111111111111111111111111111112";
+function getJupiterHeaders(): HeadersInit | undefined {
+  if (!config.jupiter.apiKey) return undefined;
+  return { "x-api-key": config.jupiter.apiKey };
+}
+
+function buildJupiterPriceUrl(ids: string[]): string {
+  const url = new URL(`${config.jupiter.baseUrl}/price/v3`);
+  url.searchParams.set("ids", ids.join(","));
+  return url.toString();
+}
+
+async function fetchJupiterPrices(
+  ids: string[]
+): Promise<Record<string, number>> {
+  const res = await fetch(buildJupiterPriceUrl(ids), {
+    headers: getJupiterHeaders(),
+  });
+
+  if (!res.ok) {
+    const text = (await res.text()).slice(0, 200);
+    throw new Error(`status=${res.status} body=${text}`);
+  }
+
+  const json = (await res.json()) as {
+    [mint: string]: {
+      usdPrice?: number;
+    } | undefined;
+  };
+
+  const keys = Object.keys(json);
+  if (keys.length === 0) {
+    throw new Error("missing data field");
+  }
+
+  const prices: Record<string, number> = {};
+  for (const mint of ids) {
+    prices[mint] = Number(json[mint]?.usdPrice ?? 0);
+  }
+  return prices;
+}
 
 export async function getSolPriceUsd(): Promise<number> {
   try {
-    const res = await fetch(SOL_PRICE_API);
-    const json = (await res.json()) as {
-      data?: Record<string, { price: string }>;
-    };
-    if (!json.data) {
-      log.warn("Jupiter API returned no data", JSON.stringify(json).slice(0, 200));
-      return 0;
-    }
-    return Number(json.data[SOL_MINT]?.price ?? 0);
+    const prices = await fetchJupiterPrices([SOL_MINT]);
+    return prices[SOL_MINT] ?? 0;
   } catch (e) {
-    log.error("Failed to fetch SOL price", e);
+    log.warn(
+      `Failed to fetch SOL price from Jupiter (${config.jupiter.baseUrl}). ${String(e)}`
+    );
     return 0;
   }
 }
@@ -66,17 +101,11 @@ export async function getPortfolioBalance(): Promise<PortfolioBalance> {
   let tokenPrices: Record<string, number> = {};
   if (mints.length > 0) {
     try {
-      const res = await fetch(
-        `https://api.jup.ag/price/v2?ids=${mints.join(",")}`
-      );
-      const json = (await res.json()) as {
-        data: Record<string, { price: string }>;
-      };
-      for (const [mint, data] of Object.entries(json.data)) {
-        tokenPrices[mint] = Number(data.price);
-      }
+      tokenPrices = await fetchJupiterPrices(mints);
     } catch (e) {
-      log.warn("Failed to fetch token prices", e);
+      log.warn(
+        `Failed to fetch token prices from Jupiter (${config.jupiter.baseUrl}). ${String(e)}`
+      );
     }
   }
 

@@ -18,9 +18,13 @@ async function main() {
 
   // Validate LLM credentials
   if (config.llmProvider === "chatgpt-oauth") {
-    log.info("Using ChatGPT via OAuth. Checking authentication...");
-    await getAccessToken(); // triggers login if needed
-    log.info("ChatGPT OAuth authenticated.");
+    if (config.openai.apiKey) {
+      log.info("Using OpenAI API key for ChatGPT analysis.");
+    } else {
+      log.info("Using ChatGPT via OAuth. Checking authentication...");
+      await getAccessToken(); // triggers login if needed
+      log.info("ChatGPT OAuth authenticated.");
+    }
   } else if (config.llmProvider === "anthropic") {
     if (!config.anthropic.apiKey) {
       log.error("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic");

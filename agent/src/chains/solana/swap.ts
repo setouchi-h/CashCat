@@ -8,8 +8,15 @@ import type { SwapParams, SwapQuote, TradeOrder, TradeResult } from "../types.js
 
 const log = createLogger("solana:swap");
 
-const JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6/quote";
-const JUPITER_SWAP_API = "https://quote-api.jup.ag/v6/swap";
+const JUPITER_QUOTE_API = `${config.jupiter.baseUrl}/swap/v1/quote`;
+const JUPITER_SWAP_API = `${config.jupiter.baseUrl}/swap/v1/swap`;
+
+function getJupiterHeaders(withJson = false): HeadersInit {
+  const headers: Record<string, string> = {};
+  if (withJson) headers["Content-Type"] = "application/json";
+  if (config.jupiter.apiKey) headers["x-api-key"] = config.jupiter.apiKey;
+  return headers;
+}
 
 export async function getJupiterQuote(params: SwapParams): Promise<SwapQuote> {
   const url = new URL(JUPITER_QUOTE_API);
@@ -18,7 +25,9 @@ export async function getJupiterQuote(params: SwapParams): Promise<SwapQuote> {
   url.searchParams.set("amount", String(params.amountLamports));
   url.searchParams.set("slippageBps", String(params.slippageBps));
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), {
+    headers: getJupiterHeaders(),
+  });
   if (!res.ok) {
     throw new Error(`Jupiter quote failed: ${res.status} ${await res.text()}`);
   }
@@ -28,8 +37,8 @@ export async function getJupiterQuote(params: SwapParams): Promise<SwapQuote> {
     outputMint: string;
     inAmount: string;
     outAmount: string;
-    priceImpactPct: string;
-    slippageBps: number;
+    priceImpactPct?: string;
+    slippageBps?: number;
   };
 
   return {
@@ -37,8 +46,9 @@ export async function getJupiterQuote(params: SwapParams): Promise<SwapQuote> {
     outputMint: data.outputMint,
     inAmount: data.inAmount,
     outAmount: data.outAmount,
-    priceImpactPct: Number(data.priceImpactPct),
-    slippageBps: data.slippageBps,
+    priceImpactPct: Number(data.priceImpactPct ?? 0),
+    slippageBps: Number(data.slippageBps ?? params.slippageBps),
+    quoteResponse: data,
   };
 }
 
@@ -62,9 +72,9 @@ export async function executeSwap(trade: TradeOrder): Promise<TradeResult> {
     const keypair = getKeypair();
     const swapRes = await fetch(JUPITER_SWAP_API, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getJupiterHeaders(true),
       body: JSON.stringify({
-        quoteResponse: quote,
+        quoteResponse: quote.quoteResponse ?? quote,
         userPublicKey: keypair.publicKey.toBase58(),
         wrapAndUnwrapSol: true,
       }),

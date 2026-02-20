@@ -50,6 +50,7 @@ export interface SwapQuote {
   outAmount: string;
   priceImpactPct: number;
   slippageBps: number;
+  quoteResponse?: unknown;
 }
 
 export interface TradeOrder {
