@@ -1,59 +1,65 @@
-import type {
-  ChainPlugin,
-  MarketData,
-  TokenInfo,
-  PortfolioBalance,
-  TradeOrder,
-  TradeResult,
-  SwapParams,
-  SwapQuote,
-} from "../types.js";
-import { getPortfolioBalance, getSolPriceUsd } from "./data.js";
-import { getJupiterQuote, executeSwap } from "./swap.js";
-import { fetchDexScreenerSolana } from "../../explorer/dexscreener.js";
+import type { ChainPlugin, TradeOrder, TradeResult } from "../types.js";
+import { executeSwap } from "./swap.js";
 import { config } from "../../config/index.js";
-import { createLogger } from "../../utils/logger.js";
-
-const log = createLogger("solana");
-
-const PAPER_INITIAL_SOL = 10;
+import { PaperPortfolio } from "./paper.js";
+import { SOL_MINT } from "./wallet.js";
 
 export class SolanaPlugin implements ChainPlugin {
   name = "solana";
-
-  async getMarketData(): Promise<MarketData[]> {
-    log.info("Fetching market data...");
-    return fetchDexScreenerSolana();
-  }
-
-  async getTrendingTokens(): Promise<TokenInfo[]> {
-    const markets = await this.getMarketData();
-    return markets
-      .sort((a, b) => b.volume24h - a.volume24h)
-      .slice(0, 20)
-      .map((m) => m.token);
-  }
-
-  async getBalance(): Promise<PortfolioBalance> {
-    if (config.paperTrade && !config.solana.privateKey) {
-      const solPrice = await getSolPriceUsd();
-      const solValueUsd = PAPER_INITIAL_SOL * solPrice;
-      log.info(`[PAPER] Portfolio: ${PAPER_INITIAL_SOL} SOL ($${solValueUsd.toFixed(2)})`);
-      return {
-        nativeBalance: PAPER_INITIAL_SOL,
-        nativeValueUsd: solValueUsd,
-        tokens: [],
-        totalValueUsd: solValueUsd,
-      };
-    }
-    return getPortfolioBalance();
-  }
+  private paper = new PaperPortfolio();
 
   async executeTrade(trade: TradeOrder): Promise<TradeResult> {
-    return executeSwap(trade);
+    if (config.paperTrade) {
+      const allowed = this.validatePaperTrade(trade);
+      if (!allowed.ok) {
+        return {
+          success: false,
+          inputAmount: String(trade.amountLamports),
+          outputAmount: "0",
+          error: allowed.reason,
+        };
+      }
+    }
+
+    const result = await executeSwap(trade);
+
+    if (config.paperTrade && result.success) {
+      const pnlUsd = await this.paper.applyTrade(trade, result);
+      if (typeof pnlUsd === "number") {
+        result.pnlUsd = pnlUsd;
+      }
+    }
+
+    return result;
   }
 
-  async getSwapQuote(params: SwapParams): Promise<SwapQuote> {
-    return getJupiterQuote(params);
+  private validatePaperTrade(
+    trade: TradeOrder
+  ): { ok: true } | { ok: false; reason: string } {
+    if (trade.action === "buy" && trade.inputMint === SOL_MINT) {
+      const solLamports = this.paper.getSolLamports();
+      const need = BigInt(trade.amountLamports);
+      if (need > solLamports) {
+        return {
+          ok: false,
+          reason: `Insufficient paper SOL balance (${solLamports} < ${need})`,
+        };
+      }
+      return { ok: true };
+    }
+
+    if (trade.action === "sell") {
+      const held = this.paper.getTokenRawBalance(trade.inputMint);
+      const need = BigInt(trade.amountLamports);
+      if (need > held) {
+        return {
+          ok: false,
+          reason: `Insufficient paper token balance (${held} < ${need})`,
+        };
+      }
+      return { ok: true };
+    }
+
+    return { ok: true };
   }
 }

@@ -4,7 +4,7 @@ import {
 import { getConnection, getKeypair } from "./wallet.js";
 import { createLogger } from "../../utils/logger.js";
 import { config } from "../../config/index.js";
-import type { SwapParams, SwapQuote, TradeOrder, TradeResult } from "../types.js";
+import type { TradeOrder, TradeResult } from "../types.js";
 
 const log = createLogger("solana:swap");
 
@@ -18,7 +18,24 @@ function getJupiterHeaders(withJson = false): HeadersInit {
   return headers;
 }
 
-export async function getJupiterQuote(params: SwapParams): Promise<SwapQuote> {
+interface JupiterQuoteParams {
+  inputMint: string;
+  outputMint: string;
+  amountLamports: number;
+  slippageBps: number;
+}
+
+interface JupiterQuote {
+  inputMint: string;
+  outputMint: string;
+  inAmount: string;
+  outAmount: string;
+  priceImpactPct: number;
+  slippageBps: number;
+  quoteResponse?: unknown;
+}
+
+async function getJupiterQuote(params: JupiterQuoteParams): Promise<JupiterQuote> {
   const url = new URL(JUPITER_QUOTE_API);
   url.searchParams.set("inputMint", params.inputMint);
   url.searchParams.set("outputMint", params.outputMint);

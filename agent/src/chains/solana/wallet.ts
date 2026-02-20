@@ -1,8 +1,6 @@
 import {
   Connection,
   Keypair,
-  PublicKey,
-  LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import { config } from "../../config/index.js";
 import { createLogger } from "../../utils/logger.js";
@@ -32,15 +30,4 @@ export function getKeypair(): Keypair {
   return keypair;
 }
 
-export function getPublicKey(): PublicKey {
-  return getKeypair().publicKey;
-}
-
-export async function getSolBalance(): Promise<number> {
-  const conn = getConnection();
-  const balance = await conn.getBalance(getPublicKey());
-  return balance / LAMPORTS_PER_SOL;
-}
-
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
-export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
