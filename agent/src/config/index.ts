@@ -1,6 +1,10 @@
 import "dotenv/config";
 
+export type LlmProvider = "chatgpt-oauth" | "anthropic";
+export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
+
 export const config = {
+  llmProvider: (process.env.LLM_PROVIDER ?? "chatgpt-oauth") as LlmProvider,
   solana: {
     privateKey: process.env.SOLANA_PRIVATE_KEY ?? "",
     rpcUrl: process.env.HELIUS_API_KEY
@@ -9,6 +13,11 @@ export const config = {
   },
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY ?? "",
+  },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY ?? "",
+    model: process.env.OPENAI_MODEL ?? "gpt-5.2",
+    reasoningEffort: (process.env.OPENAI_REASONING_EFFORT ?? "medium") as ReasoningEffort,
   },
   birdeye: {
     apiKey: process.env.BIRDEYE_API_KEY ?? "",
