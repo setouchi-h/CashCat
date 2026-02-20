@@ -10,8 +10,12 @@ export async function getSolPriceUsd(): Promise<number> {
   try {
     const res = await fetch(SOL_PRICE_API);
     const json = (await res.json()) as {
-      data: Record<string, { price: string }>;
+      data?: Record<string, { price: string }>;
     };
+    if (!json.data) {
+      log.warn("Jupiter API returned no data", JSON.stringify(json).slice(0, 200));
+      return 0;
+    }
     return Number(json.data[SOL_MINT]?.price ?? 0);
   } catch (e) {
     log.error("Failed to fetch SOL price", e);
