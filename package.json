@@ -3,7 +3,13 @@
   "private": true,
   "scripts": {
     "dev": "pnpm --filter agent dev",
+    "dev:agent": "pnpm --filter agent dev",
+    "dev:lab": "pnpm --filter lab dev",
+    "dev:all": "pnpm --parallel --filter agent --filter lab dev",
     "build": "pnpm --filter agent build",
-    "start": "pnpm --filter agent start"
+    "build:all": "pnpm --filter agent build && pnpm --filter lab build",
+    "start": "pnpm --filter agent start",
+    "start:lab": "pnpm --filter lab start",
+    "lab:cycle": "pnpm --filter lab cycle"
   }
 }
