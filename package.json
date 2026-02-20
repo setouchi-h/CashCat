@@ -1,0 +1,9 @@
+{
+  "name": "cashcat",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter agent dev",
+    "build": "pnpm --filter agent build",
+    "start": "pnpm --filter agent start"
+  }
+}
