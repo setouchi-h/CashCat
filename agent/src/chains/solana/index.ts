@@ -8,12 +8,15 @@ import type {
   SwapParams,
   SwapQuote,
 } from "../types.js";
-import { getPortfolioBalance } from "./data.js";
+import { getPortfolioBalance, getSolPriceUsd } from "./data.js";
 import { getJupiterQuote, executeSwap } from "./swap.js";
 import { fetchDexScreenerSolana } from "../../explorer/dexscreener.js";
+import { config } from "../../config/index.js";
 import { createLogger } from "../../utils/logger.js";
 
 const log = createLogger("solana");
+
+const PAPER_INITIAL_SOL = 10;
 
 export class SolanaPlugin implements ChainPlugin {
   name = "solana";
@@ -32,6 +35,17 @@ export class SolanaPlugin implements ChainPlugin {
   }
 
   async getBalance(): Promise<PortfolioBalance> {
+    if (config.paperTrade && !config.solana.privateKey) {
+      const solPrice = await getSolPriceUsd();
+      const solValueUsd = PAPER_INITIAL_SOL * solPrice;
+      log.info(`[PAPER] Portfolio: ${PAPER_INITIAL_SOL} SOL ($${solValueUsd.toFixed(2)})`);
+      return {
+        nativeBalance: PAPER_INITIAL_SOL,
+        nativeValueUsd: solValueUsd,
+        tokens: [],
+        totalValueUsd: solValueUsd,
+      };
+    }
     return getPortfolioBalance();
   }
 

@@ -6,7 +6,7 @@ const log = createLogger("solana:data");
 
 const SOL_PRICE_API = "https://api.jup.ag/price/v2?ids=So11111111111111111111111111111111111111112";
 
-async function getSolPriceUsd(): Promise<number> {
+export async function getSolPriceUsd(): Promise<number> {
   try {
     const res = await fetch(SOL_PRICE_API);
     const json = (await res.json()) as {
