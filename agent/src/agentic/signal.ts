@@ -1,14 +1,4 @@
-export interface SignalPoint {
-  ts: number;
-  priceUsd: number;
-}
-
-export interface MomentumSignal {
-  score: number;
-  momentum1m: number;
-  momentum5m: number;
-  volatility: number;
-}
+import type { MomentumSignal, SignalPoint } from "./types.js";
 
 function findPriceAtOrBefore(points: SignalPoint[], targetTs: number): number | null {
   for (let i = points.length - 1; i >= 0; i--) {

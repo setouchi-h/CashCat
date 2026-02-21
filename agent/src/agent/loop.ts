@@ -3,15 +3,18 @@ import type { ChainPlugin, TradeOrder } from "../chains/types.js";
 import { config } from "../config/index.js";
 import { createLogger } from "../utils/logger.js";
 import { PortfolioTracker } from "../portfolio/tracker.js";
+import { AgenticEngine } from "../agentic/engine.js";
 import {
   archiveConsumedItem,
   consumeExecutionIntents,
   consumeImprovementProposals,
   prepareRuntimeDirs,
   triggerRuntimeAutoRun,
+  writeExecutionIntent,
   writeExecutionResult,
   writeImprovementVerdict,
 } from "../runtime/bridge.js";
+import { executeTradeViaWalletMcp } from "../runtime/wallet-mcp.js";
 import type {
   ExecutionIntent,
   ExecutionResult,
@@ -24,20 +27,33 @@ const log = createLogger("agent");
 export class AgentLoop {
   private chains: ChainPlugin[];
   private tracker: PortfolioTracker;
+  private agentic: AgenticEngine | null;
+  private pendingAgenticIntentIds = new Set<string>();
   private running = false;
   private cycleCount = 0;
 
   constructor(chains: ChainPlugin[]) {
     this.chains = chains;
     this.tracker = new PortfolioTracker();
+    this.agentic = config.runtime.agentic.enabled ? new AgenticEngine() : null;
   }
 
   async start(): Promise<void> {
     await prepareRuntimeDirs();
+    if (this.agentic) {
+      await this.agentic.init();
+    }
     this.running = true;
     log.info(
       `Executor started (paper=${config.paperTrade}, interval=${config.scanIntervalSeconds}s)`
     );
+    if (this.agentic) {
+      log.info(
+        `Agentic mode enabled (tokens=${config.runtime.agentic.tokenUniverse
+          .map((t) => t.symbol)
+          .join(", ")}, maxIntentsPerCycle=${config.runtime.agentic.maxIntentsPerCycle})`
+      );
+    }
 
     while (this.running) {
       this.cycleCount++;
@@ -50,7 +66,14 @@ export class AgentLoop {
       }
 
       let executed = 0;
+      let agenticSubmitted = 0;
       let judged = 0;
+
+      try {
+        agenticSubmitted = await this.processAgenticIntents();
+      } catch (e) {
+        log.error("Agentic processing error", e);
+      }
 
       try {
         executed = await this.processExecutionIntents();
@@ -64,8 +87,8 @@ export class AgentLoop {
         log.error("Proposal processing error", e);
       }
 
-      if (executed === 0 && judged === 0) {
-        log.info("No intents or proposals in queue");
+      if (agenticSubmitted === 0 && executed === 0 && judged === 0) {
+        log.info("No internal intents, external intents, or proposals");
       }
 
       if (executed > 0) {
@@ -93,16 +116,60 @@ export class AgentLoop {
     log.info(`Loaded ${items.length} execution intents`);
 
     let processed = 0;
+    let agenticProcessed = 0;
     for (const item of items) {
       const intent = item.payload;
       const result = await this.executeIntent(intent);
 
       await writeExecutionResult(result);
       await archiveConsumedItem(item.filePath, result.status);
+
+      if (
+        this.agentic &&
+        this.pendingAgenticIntentIds.has(intent.id)
+      ) {
+        this.pendingAgenticIntentIds.delete(intent.id);
+        this.agentic.applyExecutionResult(intent, result);
+        agenticProcessed++;
+      }
       processed++;
     }
 
+    if (this.agentic && agenticProcessed > 0) {
+      await this.agentic.save();
+      log.info(
+        `[Agentic] Applied ${agenticProcessed} results (${this.agentic.getSummary()})`
+      );
+    }
+
     return processed;
+  }
+
+  private async processAgenticIntents(): Promise<number> {
+    if (!this.agentic) return 0;
+
+    const plan = await this.agentic.planCycle(this.cycleCount);
+    for (const note of plan.notes) {
+      log.info(`[Agentic] ${note}`);
+    }
+    if (plan.intents.length === 0) {
+      log.info(`[Agentic] No action (${this.agentic.getSummary()})`);
+      await this.agentic.save();
+      return 0;
+    }
+
+    log.info(`[Agentic] Planned ${plan.intents.length} intents`);
+
+    let submitted = 0;
+    for (const intent of plan.intents) {
+      await writeExecutionIntent(intent);
+      this.pendingAgenticIntentIds.add(intent.id);
+      submitted++;
+    }
+
+    await this.agentic.save();
+    log.info(`[Agentic] Submitted ${submitted} intents to runtime queue`);
+    return submitted;
   }
 
   private async processImprovementProposals(): Promise<number> {
@@ -148,7 +215,9 @@ export class AgentLoop {
       slippageBps: intent.slippageBps,
     };
 
-    const result = await this.chains[0].executeTrade(order);
+    const result = config.runtime.walletMcp.enabled
+      ? await executeTradeViaWalletMcp(intent.id, order)
+      : await this.chains[0].executeTrade(order);
     const now = new Date().toISOString();
 
     const executionResult: ExecutionResult = {
@@ -165,7 +234,7 @@ export class AgentLoop {
     this.tracker.recordTrade({
       id: `${intent.id}-${Date.now()}`,
       timestamp: now,
-      chain: this.chains[0].name,
+      chain: config.runtime.walletMcp.enabled ? "solana-mcp" : this.chains[0].name,
       action: intent.action,
       tokenSymbol: inferTokenSymbol(intent),
       tokenAddress: intent.outputMint,

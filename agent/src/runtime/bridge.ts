@@ -101,6 +101,20 @@ export async function consumeExecutionIntents(
   );
 }
 
+export async function writeExecutionIntent(
+  intent: ExecutionIntent
+): Promise<string> {
+  await ensureDir(config.runtime.intentDir);
+  const filePath = path.join(
+    config.runtime.intentDir,
+    `${Date.now()}.${process.pid}.${intent.id}.intent.json`
+  );
+  const tempPath = filePath + ".tmp";
+  await fs.writeFile(tempPath, JSON.stringify(intent, null, 2));
+  await fs.rename(tempPath, filePath);
+  return filePath;
+}
+
 export async function consumeImprovementProposals(
   limit: number
 ): Promise<RuntimeQueueItem<ImprovementProposal>[]> {

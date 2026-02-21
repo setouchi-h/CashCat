@@ -4,12 +4,13 @@
   "scripts": {
     "dev": "pnpm --filter agent dev",
     "dev:agent": "pnpm --filter agent dev",
-    "dev:lab": "pnpm --filter lab dev",
-    "dev:all": "pnpm --parallel --filter agent --filter lab dev",
+    "dev:ui": "pnpm --filter agent dev:ui",
+    "dev:wallet-mcp": "pnpm --filter wallet-mcp dev",
+    "dev:all": "pnpm --parallel --filter agent --filter wallet-mcp dev",
     "build": "pnpm --filter agent build",
-    "build:all": "pnpm --filter agent build && pnpm --filter lab build",
+    "build:wallet-mcp": "pnpm --filter wallet-mcp build",
+    "build:all": "pnpm --filter agent build && pnpm --filter wallet-mcp build",
     "start": "pnpm --filter agent start",
-    "start:lab": "pnpm --filter lab start",
-    "lab:cycle": "pnpm --filter lab cycle"
+    "start:wallet-mcp": "pnpm --filter wallet-mcp start"
   }
 }

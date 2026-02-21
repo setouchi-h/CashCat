@@ -9,6 +9,22 @@ async function main() {
   log.info("CashCat Trading Agent starting...");
   log.info(`Mode: ${config.paperTrade ? "PAPER TRADE" : "LIVE"}`);
   log.info("Execution mode: external intents");
+  log.info(
+    `Execution backend: ${
+      config.runtime.walletMcp.enabled
+        ? `wallet-mcp (${config.runtime.walletMcp.command})`
+        : "direct chain plugin"
+    }`
+  );
+  log.info(
+    `Agentic planner: ${
+      config.runtime.agentic.enabled
+        ? `ON mode=${config.runtime.agentic.plannerMode} (${config.runtime.agentic.tokenUniverse
+            .map((token) => token.symbol)
+            .join(", ")})`
+        : "OFF"
+    }`
+  );
   log.info(`Scan interval: ${config.scanIntervalSeconds} seconds`);
   log.info(
     `Runtime queue: intents=${config.runtime.intentDir}, results=${config.runtime.resultDir}, proposals=${config.runtime.proposalDir}, verdicts=${config.runtime.verdictDir}`
