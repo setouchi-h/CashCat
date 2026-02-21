@@ -21,7 +21,7 @@ const DEFAULT_UNIVERSE: TokenConfig[] = [
   },
   {
     symbol: "JTO",
-    mint: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwzgq2QHMYy",
+    mint: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
     decimals: 9,
   },
 ];
@@ -29,6 +29,11 @@ const DEFAULT_UNIVERSE: TokenConfig[] = [
 function parseNumber(raw: string | undefined, fallback: number): number {
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function parseOptional(raw: string | undefined): string | undefined {
+  const value = (raw ?? "").trim();
+  return value.length > 0 ? value : undefined;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -72,10 +77,12 @@ export const config = {
       process.env.RUNTIME_VERDICT_DIR ?? "/tmp/cashcat-runtime/verdicts",
   },
   market: {
-    jupiterApiKey: process.env.JUPITER_API_KEY ?? "",
+    jupiterApiKey: parseOptional(process.env.JUPITER_API_KEY) ?? "",
     jupiterBaseUrl:
-      process.env.JUPITER_API_BASE_URL ??
-      (process.env.JUPITER_API_KEY ? "https://api.jup.ag" : "https://lite-api.jup.ag"),
+      parseOptional(process.env.JUPITER_API_BASE_URL) ??
+      (parseOptional(process.env.JUPITER_API_KEY)
+        ? "https://api.jup.ag"
+        : "https://lite-api.jup.ag"),
     tokenUniverse: parseTokenUniverse(process.env.LAB_TOKEN_UNIVERSE),
     historyKeepPoints: Math.max(
       60,
@@ -126,6 +133,19 @@ export const config = {
       1,
       Math.floor(parseNumber(process.env.LAB_INTENT_SLIPPAGE_BPS, 100))
     ),
+    explore: {
+      enabled: process.env.LAB_EXPLORE_ENABLED !== "false",
+      everyCycles: Math.max(
+        2,
+        Math.floor(parseNumber(process.env.LAB_EXPLORE_EVERY_CYCLES, 6))
+      ),
+      minScore: parseNumber(process.env.LAB_EXPLORE_MIN_SCORE, 0),
+      tradeSizeScale: clamp(
+        parseNumber(process.env.LAB_EXPLORE_TRADE_SIZE_SCALE, 0.5),
+        0.1,
+        1
+      ),
+    },
   },
   accounting: {
     initialCashSol: Math.max(0.1, parseNumber(process.env.LAB_INITIAL_CASH_SOL, 10)),

@@ -11,6 +11,16 @@ function buildPriceUrl(mints: string[]): string {
   return url.toString();
 }
 
+function toNumber(value: unknown): number {
+  const num =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+  return Number.isFinite(num) ? num : 0;
+}
+
 export async function fetchPricesUsd(
   mints: string[]
 ): Promise<Record<string, number>> {
@@ -25,14 +35,25 @@ export async function fetchPricesUsd(
     throw new Error(`Jupiter price failed: ${response.status} ${body}`);
   }
 
-  const json = (await response.json()) as Record<
-    string,
-    { usdPrice?: number } | undefined
-  >;
+  const payload = (await response.json()) as
+    | Record<string, unknown>
+    | { data?: Record<string, unknown> };
+  const data: Record<string, unknown> =
+    payload &&
+    typeof payload === "object" &&
+    "data" in payload &&
+    payload.data &&
+    typeof payload.data === "object"
+      ? (payload.data as Record<string, unknown>)
+      : (payload as Record<string, unknown>);
 
   const prices: Record<string, number> = {};
   for (const mint of mints) {
-    prices[mint] = Number(json[mint]?.usdPrice ?? 0);
+    const row = data[mint] as Record<string, unknown> | undefined;
+    const price = toNumber(
+      row?.usdPrice ?? row?.price ?? row?.priceUsd ?? row?.value
+    );
+    prices[mint] = price > 0 ? price : 0;
   }
   return prices;
 }

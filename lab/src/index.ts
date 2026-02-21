@@ -39,6 +39,25 @@ function toBigint(value: string): bigint {
   }
 }
 
+function parseInsufficientPaperTokenBalance(
+  message: string
+): { available: bigint; requested: bigint } | null {
+  const match = message.match(
+    /Insufficient paper token balance \((\d+) < (\d+)\)/
+  );
+  if (!match) return null;
+  return {
+    available: toBigint(match[1]),
+    requested: toBigint(match[2]),
+  };
+}
+
+function parseInsufficientPaperSolBalance(message: string): bigint | null {
+  const match = message.match(/Insufficient paper SOL balance \((\d+) < (\d+)\)/);
+  if (!match) return null;
+  return toBigint(match[1]);
+}
+
 function minBigint(a: bigint, b: bigint): bigint {
   return a < b ? a : b;
 }
@@ -192,6 +211,48 @@ function applyResult(state: LabState, result: ExecutionResult): string {
 
   if (result.status !== "filled") {
     state.failedCount++;
+    const message = result.error ?? result.reason ?? "no reason";
+
+    if (record.action === "sell") {
+      const parsed = parseInsufficientPaperTokenBalance(message);
+      if (parsed) {
+        const position = state.positions[record.inputMint];
+        if (position) {
+          const currentRaw = toBigint(position.rawAmount);
+          const currentCost = toBigint(position.costLamports);
+
+          // Executor reports zero token balance => drop stale position and refund cost basis.
+          if (parsed.available <= 0n || currentRaw <= 0n) {
+            state.cashLamports = (toBigint(state.cashLamports) + currentCost).toString();
+            delete state.positions[record.inputMint];
+            return `Result ${result.intentId} FAILED (${message}) -> resync: dropped stale ${position.symbol} position`;
+          }
+
+          // Partial mismatch: shrink local position to executor-reported available balance.
+          const nextRaw = minBigint(currentRaw, parsed.available);
+          const nextCost = (currentCost * nextRaw) / currentRaw;
+          const refundedCost = currentCost - nextCost;
+
+          state.positions[record.inputMint] = {
+            ...position,
+            rawAmount: nextRaw.toString(),
+            costLamports: nextCost.toString(),
+            updatedAt: nowIso(),
+          };
+          state.cashLamports = (toBigint(state.cashLamports) + refundedCost).toString();
+          return `Result ${result.intentId} FAILED (${message}) -> resync: adjusted ${position.symbol} balance`;
+        }
+      }
+    }
+
+    if (record.action === "buy") {
+      const availableSol = parseInsufficientPaperSolBalance(message);
+      if (availableSol !== null) {
+        state.cashLamports = availableSol.toString();
+        return `Result ${result.intentId} FAILED (${message}) -> resync: cash updated to executor SOL balance`;
+      }
+    }
+
     return `Result ${result.intentId} ${result.status.toUpperCase()} (${result.error ?? result.reason ?? "no reason"})`;
   }
 

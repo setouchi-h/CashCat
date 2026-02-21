@@ -34,6 +34,29 @@ function calcBuyLamports(cashLamports: bigint, tradeAllocationPct: number, minTr
   return amount;
 }
 
+function calcExploreLamports(
+  cashLamports: bigint,
+  tradeAllocationPct: number,
+  minTradeSol: number,
+  maxTradeSol: number,
+  tradeSizeScale: number
+): bigint {
+  const base = calcBuyLamports(
+    cashLamports,
+    tradeAllocationPct,
+    minTradeSol,
+    maxTradeSol
+  );
+  if (base <= 0n) return 0n;
+
+  const scalePpm = BigInt(Math.max(1, Math.floor(tradeSizeScale * 1_000_000)));
+  let amount = (base * scalePpm) / 1_000_000n;
+  const minProbe = 10_000_000n; // 0.01 SOL
+  if (amount < minProbe) amount = minProbe;
+  if (amount > cashLamports) amount = cashLamports;
+  return amount > 0n ? amount : 0n;
+}
+
 function calcSellRaw(rawAmount: bigint, sellFraction: number): bigint {
   if (rawAmount <= 0n) return 0n;
   if (sellFraction >= 0.999) return rawAmount;
@@ -79,6 +102,15 @@ export function buildIntents(state: LabState, now: Date): BuildIntentsOutput {
 
   const intents: ExecutionIntent[] = [];
   const notes: string[] = [];
+  const exploreCandidates: {
+    symbol: string;
+    mint: string;
+    score: number;
+    momentum1m: number;
+    momentum5m: number;
+    volatility: number;
+    lastIntentAt: number;
+  }[] = [];
 
   for (const token of config.market.tokenUniverse) {
     if (intents.length >= config.loop.maxIntentsPerCycle) break;
@@ -138,6 +170,16 @@ export function buildIntents(state: LabState, now: Date): BuildIntentsOutput {
       continue;
     }
 
+    exploreCandidates.push({
+      symbol: token.symbol,
+      mint: token.mint,
+      score: signal.score,
+      momentum1m: signal.momentum1m,
+      momentum5m: signal.momentum5m,
+      volatility: signal.volatility,
+      lastIntentAt,
+    });
+
     if (openPositions >= state.policy.maxOpenPositions) continue;
     if (signal.score < state.policy.buyMomentumThreshold) continue;
 
@@ -178,6 +220,57 @@ export function buildIntents(state: LabState, now: Date): BuildIntentsOutput {
         Number(buyLamports) / 1_000_000_000
       ).toFixed(3)} SOL`
     );
+  }
+
+  if (
+    intents.length === 0 &&
+    openPositions === 0 &&
+    config.strategy.explore.enabled &&
+    state.cycle % config.strategy.explore.everyCycles === 0
+  ) {
+    const candidate = exploreCandidates
+      .filter((c) => nowMs - c.lastIntentAt >= minGapMs)
+      .sort((a, b) => b.score - a.score)[0];
+
+    if (candidate && candidate.score >= config.strategy.explore.minScore) {
+      const buyLamports = calcExploreLamports(
+        simulatedCash,
+        state.policy.tradeAllocationPct,
+        state.policy.minTradeSol,
+        state.policy.maxTradeSol,
+        config.strategy.explore.tradeSizeScale
+      );
+
+      if (buyLamports > 0n) {
+        const id = makeIntentId(candidate.symbol, "buy", nowMs);
+        intents.push({
+          type: "execution-intent",
+          id,
+          createdAt: now.toISOString(),
+          expiresAt: new Date(nowMs + config.loop.intervalSeconds * 3000).toISOString(),
+          action: "buy",
+          inputMint: SOL_MINT,
+          outputMint: candidate.mint,
+          amountLamports: Number(buyLamports),
+          slippageBps: state.policy.intentSlippageBps,
+          metadata: {
+            tokenSymbol: candidate.symbol,
+            source: "lab-explore",
+            explore: true,
+            score: candidate.score,
+            momentum1m: candidate.momentum1m,
+            momentum5m: candidate.momentum5m,
+            volatility: candidate.volatility,
+          },
+        });
+        state.lastIntentAt[candidate.mint] = nowMs;
+        notes.push(
+          `EXPLORE BUY ${candidate.symbol} score=${candidate.score.toFixed(4)} amount=${(
+            Number(buyLamports) / 1_000_000_000
+          ).toFixed(3)} SOL`
+        );
+      }
+    }
   }
 
   return {
