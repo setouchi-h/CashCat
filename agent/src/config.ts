@@ -18,6 +18,9 @@ function clamp(value: number, min: number, max: number): number {
 
 export const config = {
   scanIntervalSeconds: Number(process.env.SCAN_INTERVAL_SECONDS) || 90,
+  stopLossIntervalSeconds: Math.max(5, Math.floor(
+    parseNumber(process.env.RUNTIME_AGENTIC_STOP_LOSS_INTERVAL_SECONDS, 10)
+  )),
   logLevel: (process.env.LOG_LEVEL ?? "info") as string,
   jupiter: {
     baseUrl: parseOptional(process.env.JUPITER_API_BASE_URL) ?? "https://lite-api.jup.ag",
