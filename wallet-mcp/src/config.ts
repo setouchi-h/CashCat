@@ -26,9 +26,9 @@ export const config = {
   },
   solana: {
     privateKey: parseOptional(process.env.SOLANA_PRIVATE_KEY) ?? "",
-    rpcUrl: parseOptional(process.env.HELIUS_API_KEY)
-      ? `https://mainnet.helius-rpc.com/?api-key=${parseOptional(process.env.HELIUS_API_KEY)}`
-      : "https://api.mainnet-beta.solana.com",
+    rpcUrl:
+      parseOptional(process.env.SOLANA_RPC_URL) ??
+      "https://api.mainnet-beta.solana.com",
   },
   jupiter: {
     apiKey: parseOptional(process.env.JUPITER_API_KEY) ?? "",

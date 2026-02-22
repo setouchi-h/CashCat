@@ -89,9 +89,9 @@ function parsePlannerMode(raw: string | undefined): AgenticPlannerMode {
 
 export const config = {
   solana: {
-    rpcUrl: parseOptional(process.env.HELIUS_API_KEY)
-      ? `https://mainnet.helius-rpc.com/?api-key=${parseOptional(process.env.HELIUS_API_KEY)}`
-      : "https://api.mainnet-beta.solana.com",
+    rpcUrl:
+      parseOptional(process.env.SOLANA_RPC_URL) ??
+      "https://api.mainnet-beta.solana.com",
   },
   jupiter: {
     baseUrl:
