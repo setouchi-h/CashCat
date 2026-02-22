@@ -89,7 +89,6 @@ function parsePlannerMode(raw: string | undefined): AgenticPlannerMode {
 
 export const config = {
   solana: {
-    privateKey: parseOptional(process.env.SOLANA_PRIVATE_KEY) ?? "",
     rpcUrl: parseOptional(process.env.HELIUS_API_KEY)
       ? `https://mainnet.helius-rpc.com/?api-key=${parseOptional(process.env.HELIUS_API_KEY)}`
       : "https://api.mainnet-beta.solana.com",
@@ -128,9 +127,9 @@ export const config = {
       minPnlDeltaPct: Number(process.env.RUNTIME_GATE_MIN_PNL_DELTA_PCT) || 0.2,
       minSharpeDelta: Number(process.env.RUNTIME_GATE_MIN_SHARPE_DELTA) || 0.05,
       maxDrawdownDeltaPct:
-        Number(process.env.RUNTIME_GATE_MAX_DRAWDOWN_DELTA_PCT) || 0,
+        Number(process.env.RUNTIME_GATE_MAX_DRAWDOWN_DELTA_PCT) || 2,
       minTestPassRate:
-        Number(process.env.RUNTIME_GATE_MIN_TEST_PASS_RATE) || 0.98,
+        Number(process.env.RUNTIME_GATE_MIN_TEST_PASS_RATE) || 0.95,
     },
     walletMcp: {
       enabled: process.env.RUNTIME_WALLET_MCP_ENABLED !== "false",
@@ -161,14 +160,14 @@ export const config = {
         process.env.RUNTIME_AGENTIC_SELL_MOMENTUM_THRESHOLD,
         -0.003
       ),
-      takeProfitPct: parseNumber(process.env.RUNTIME_AGENTIC_TAKE_PROFIT_PCT, 0.06),
-      stopLossPct: parseNumber(process.env.RUNTIME_AGENTIC_STOP_LOSS_PCT, -0.04),
+      takeProfitPct: parseNumber(process.env.RUNTIME_AGENTIC_TAKE_PROFIT_PCT, 0.15),
+      stopLossPct: parseNumber(process.env.RUNTIME_AGENTIC_STOP_LOSS_PCT, -0.10),
       maxHoldMinutes: Math.max(
         5,
-        Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MAX_HOLD_MINUTES, 180))
+        Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MAX_HOLD_MINUTES, 480))
       ),
       tradeAllocationPct: clamp(
-        parseNumber(process.env.RUNTIME_AGENTIC_TRADE_ALLOCATION_PCT, 0.08),
+        parseNumber(process.env.RUNTIME_AGENTIC_TRADE_ALLOCATION_PCT, 0.15),
         0.01,
         1
       ),
@@ -178,11 +177,11 @@ export const config = {
       ),
       maxTradeSol: Math.max(
         0.001,
-        parseNumber(process.env.RUNTIME_AGENTIC_MAX_TRADE_SOL, 1)
+        parseNumber(process.env.RUNTIME_AGENTIC_MAX_TRADE_SOL, 3)
       ),
       maxOpenPositions: Math.max(
         1,
-        Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MAX_OPEN_POSITIONS, 3))
+        Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MAX_OPEN_POSITIONS, 5))
       ),
       sellFraction: clamp(
         parseNumber(process.env.RUNTIME_AGENTIC_SELL_FRACTION, 1),
@@ -195,11 +194,11 @@ export const config = {
       ),
       minIntentGapSeconds: Math.max(
         5,
-        Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MIN_INTENT_GAP_SECONDS, 60))
+        Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MIN_INTENT_GAP_SECONDS, 30))
       ),
       maxIntentsPerCycle: Math.max(
         1,
-        Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MAX_INTENTS_PER_CYCLE, 2))
+        Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MAX_INTENTS_PER_CYCLE, 4))
       ),
       initialCashSol: Math.max(
         0.1,

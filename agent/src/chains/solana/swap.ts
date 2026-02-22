@@ -1,7 +1,3 @@
-import {
-  VersionedTransaction,
-} from "@solana/web3.js";
-import { getConnection, getKeypair } from "./wallet.js";
 import { createLogger } from "../../utils/logger.js";
 import { config } from "../../config/index.js";
 import type { TradeOrder, TradeResult } from "../types.js";
@@ -9,11 +5,9 @@ import type { TradeOrder, TradeResult } from "../types.js";
 const log = createLogger("solana:swap");
 
 const JUPITER_QUOTE_API = `${config.jupiter.baseUrl}/swap/v1/quote`;
-const JUPITER_SWAP_API = `${config.jupiter.baseUrl}/swap/v1/swap`;
 
-function getJupiterHeaders(withJson = false): HeadersInit {
+function getJupiterHeaders(): HeadersInit {
   const headers: Record<string, string> = {};
-  if (withJson) headers["Content-Type"] = "application/json";
   if (config.jupiter.apiKey) headers["x-api-key"] = config.jupiter.apiKey;
   return headers;
 }
@@ -70,78 +64,13 @@ async function getJupiterQuote(params: JupiterQuoteParams): Promise<JupiterQuote
 }
 
 export async function executeSwap(trade: TradeOrder): Promise<TradeResult> {
-  if (config.paperTrade) {
-    return executePaperSwap(trade);
+  if (!config.paperTrade) {
+    throw new Error(
+      "Live swap via agent is disabled. Use wallet-mcp for live trades."
+    );
   }
 
-  try {
-    // 1. Get quote
-    const quote = await getJupiterQuote({
-      inputMint: trade.inputMint,
-      outputMint: trade.outputMint,
-      amountLamports: trade.amountLamports,
-      slippageBps: trade.slippageBps,
-    });
-
-    log.info(`Quote: ${quote.inAmount} -> ${quote.outAmount} (impact: ${quote.priceImpactPct}%)`);
-
-    // 2. Get swap transaction
-    const keypair = getKeypair();
-    const swapRes = await fetch(JUPITER_SWAP_API, {
-      method: "POST",
-      headers: getJupiterHeaders(true),
-      body: JSON.stringify({
-        quoteResponse: quote.quoteResponse ?? quote,
-        userPublicKey: keypair.publicKey.toBase58(),
-        wrapAndUnwrapSol: true,
-      }),
-    });
-
-    if (!swapRes.ok) {
-      throw new Error(`Jupiter swap failed: ${swapRes.status} ${await swapRes.text()}`);
-    }
-
-    const { swapTransaction } = (await swapRes.json()) as {
-      swapTransaction: string;
-    };
-
-    // 3. Sign and send
-    const txBuf = Buffer.from(swapTransaction, "base64");
-    const tx = VersionedTransaction.deserialize(txBuf);
-    tx.sign([keypair]);
-
-    const conn = getConnection();
-    const txHash = await conn.sendRawTransaction(tx.serialize(), {
-      skipPreflight: false,
-      maxRetries: 2,
-    });
-
-    // 4. Confirm
-    const latestBlockhash = await conn.getLatestBlockhash();
-    await conn.confirmTransaction({
-      signature: txHash,
-      blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-    });
-
-    log.info(`Swap executed: ${txHash}`);
-
-    return {
-      success: true,
-      txHash,
-      inputAmount: quote.inAmount,
-      outputAmount: quote.outAmount,
-    };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    log.error(`Swap failed: ${msg}`);
-    return {
-      success: false,
-      inputAmount: String(trade.amountLamports),
-      outputAmount: "0",
-      error: msg,
-    };
-  }
+  return executePaperSwap(trade);
 }
 
 async function executePaperSwap(trade: TradeOrder): Promise<TradeResult> {

@@ -8,14 +8,23 @@ const log = createLogger("ui");
 
 const DEFAULT_LEDGER_PATH = "/tmp/cashcat-runtime/wallet-mcp/ledger.jsonl";
 const PORT = Number(process.env.DASHBOARD_PORT ?? 8787);
+const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 interface Snapshot {
   now: string;
   mode: "paper" | "live";
   plannerMode: string;
   cycle: number;
+  solPriceUsd: number;
   cashSol: number;
+  cashUsd: number;
   realizedSol: number;
+  realizedUsd: number;
+  unrealizedUsd: number;
+  equityUsd: number;
+  initialEquityUsd: number;
+  totalPnlUsd: number;
+  totalPnlPct: number;
   filledCount: number;
   failedCount: number;
   openPositions: number;
@@ -24,6 +33,11 @@ interface Snapshot {
     symbol: string;
     rawAmount: string;
     decimals: number;
+    quantity: number;
+    latestPriceUsd: number;
+    marketValueUsd: number;
+    costUsd: number;
+    unrealizedPnlUsd: number;
     costLamports: string;
     openedAt: string;
     updatedAt: string;
@@ -72,6 +86,33 @@ function toBigInt(value: unknown): bigint {
 
 function lamportsToSol(value: unknown): number {
   return Number(toBigInt(value)) / 1_000_000_000;
+}
+
+function tokenRawToAmount(rawAmount: unknown, decimals: number): number {
+  const raw = Number(toBigInt(rawAmount));
+  const divisor = 10 ** Math.max(0, decimals);
+  if (!Number.isFinite(raw) || !Number.isFinite(divisor) || divisor <= 0) {
+    return 0;
+  }
+  return raw / divisor;
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function getLatestPriceUsd(
+  marketHistory: Record<string, unknown>,
+  mint: string
+): number {
+  const points = marketHistory[mint];
+  if (!Array.isArray(points) || points.length === 0) return 0;
+  const last = points.at(-1);
+  if (!last || typeof last !== "object") return 0;
+  const value = Number((last as Record<string, unknown>).priceUsd ?? 0);
+  return Number.isFinite(value) ? value : 0;
 }
 
 async function fileExists(target: string): Promise<boolean> {
@@ -214,8 +255,16 @@ async function loadSnapshot(): Promise<Snapshot> {
   );
 
   let cycle = 0;
+  let solPriceUsd = 0;
   let cashSol = 0;
+  let cashUsd = 0;
   let realizedSol = 0;
+  let realizedUsd = 0;
+  let unrealizedUsd = 0;
+  let equityUsd = 0;
+  let initialEquityUsd = 0;
+  let totalPnlUsd = 0;
+  let totalPnlPct = 0;
   let filledCount = 0;
   let failedCount = 0;
   let positions: Snapshot["positions"] = [];
@@ -224,9 +273,13 @@ async function loadSnapshot(): Promise<Snapshot> {
     try {
       const raw = await fs.readFile(statePath, "utf8");
       const state = JSON.parse(raw) as Record<string, unknown>;
+      const marketHistory = toRecord(state.marketHistory);
       cycle = Number(state.cycle ?? 0) || 0;
+      solPriceUsd = getLatestPriceUsd(marketHistory, SOL_MINT);
       cashSol = lamportsToSol(state.cashLamports);
+      cashUsd = cashSol * solPriceUsd;
       realizedSol = lamportsToSol(state.realizedPnlLamports);
+      realizedUsd = realizedSol * solPriceUsd;
       filledCount = Number(state.filledCount ?? 0) || 0;
       failedCount = Number(state.failedCount ?? 0) || 0;
 
@@ -238,17 +291,45 @@ async function loadSnapshot(): Promise<Snapshot> {
         .filter((value) => value && typeof value === "object")
         .map((value) => {
           const p = value as Record<string, unknown>;
+          const decimals = Number(p.decimals ?? 0) || 0;
+          const quantity = tokenRawToAmount(p.rawAmount, decimals);
+          const latestPrice = getLatestPriceUsd(
+            marketHistory,
+            typeof p.mint === "string" ? p.mint : ""
+          );
+          const marketValueUsd = quantity * latestPrice;
+          const costUsd = lamportsToSol(p.costLamports) * solPriceUsd;
+          const unrealizedPnlUsd = marketValueUsd - costUsd;
           return {
             mint: typeof p.mint === "string" ? p.mint : "",
             symbol: typeof p.symbol === "string" ? p.symbol : "",
             rawAmount: typeof p.rawAmount === "string" ? p.rawAmount : "0",
-            decimals: Number(p.decimals ?? 0) || 0,
+            decimals,
+            quantity,
+            latestPriceUsd: latestPrice,
+            marketValueUsd,
+            costUsd,
+            unrealizedPnlUsd,
             costLamports:
               typeof p.costLamports === "string" ? p.costLamports : "0",
             openedAt: typeof p.openedAt === "string" ? p.openedAt : "",
             updatedAt: typeof p.updatedAt === "string" ? p.updatedAt : "",
           };
         });
+
+      unrealizedUsd = positions.reduce(
+        (sum, position) => sum + position.unrealizedPnlUsd,
+        0
+      );
+      const positionValueUsd = positions.reduce(
+        (sum, position) => sum + position.marketValueUsd,
+        0
+      );
+      equityUsd = cashUsd + positionValueUsd;
+      initialEquityUsd = config.runtime.agentic.initialCashSol * solPriceUsd;
+      totalPnlUsd = equityUsd - initialEquityUsd;
+      totalPnlPct =
+        initialEquityUsd > 0 ? (totalPnlUsd / initialEquityUsd) * 100 : 0;
     } catch (e) {
       log.warn(`Failed to parse state: ${String(e)}`);
     }
@@ -268,8 +349,16 @@ async function loadSnapshot(): Promise<Snapshot> {
     mode: config.paperTrade ? "paper" : "live",
     plannerMode: config.runtime.agentic.plannerMode,
     cycle,
+    solPriceUsd,
     cashSol,
+    cashUsd,
     realizedSol,
+    realizedUsd,
+    unrealizedUsd,
+    equityUsd,
+    initialEquityUsd,
+    totalPnlUsd,
+    totalPnlPct,
     filledCount,
     failedCount,
     openPositions: positions.length,
@@ -368,7 +457,7 @@ function htmlPage(): string {
 <body>
   <div class="wrap">
     <h1>CashCat Runtime Dashboard</h1>
-    <div class="sub">Auto refresh: 3s | Endpoint: <span class="mono">/api/snapshot</span></div>
+    <div class="sub">Auto refresh: 3s | Endpoint: <span class="mono">/api/snapshot</span> | PnL is paper estimation from state + latest prices</div>
     <div class="grid" id="metrics"></div>
     <div class="row">
       <div class="card">
@@ -391,6 +480,7 @@ function htmlPage(): string {
   </div>
   <script>
     const fmt = (n, d = 4) => Number(n || 0).toFixed(d);
+    const money = (n) => (Number(n || 0) >= 0 ? "+" : "") + Number(n || 0).toFixed(2);
     const esc = (s) => String(s ?? "")
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
@@ -401,8 +491,15 @@ function htmlPage(): string {
         ["Mode", s.mode],
         ["Planner", s.plannerMode],
         ["Cycle", s.cycle],
+        ["SOL Price (USD)", "$" + fmt(s.solPriceUsd, 4)],
         ["Cash (SOL)", fmt(s.cashSol)],
+        ["Cash (USD)", "$" + fmt(s.cashUsd, 2)],
         ["Realized (SOL)", fmt(s.realizedSol, 6), s.realizedSol >= 0 ? "ok" : "danger"],
+        ["Realized (USD)", "$" + money(s.realizedUsd), s.realizedUsd >= 0 ? "ok" : "danger"],
+        ["Unrealized (USD)", "$" + money(s.unrealizedUsd), s.unrealizedUsd >= 0 ? "ok" : "danger"],
+        ["Total PnL (USD)", "$" + money(s.totalPnlUsd), s.totalPnlUsd >= 0 ? "ok" : "danger"],
+        ["Total PnL (%)", fmt(s.totalPnlPct, 2) + "%", s.totalPnlPct >= 0 ? "ok" : "danger"],
+        ["Equity (USD)", "$" + fmt(s.equityUsd, 2)],
         ["Open Positions", s.openPositions],
         ["Filled", s.filledCount, "ok"],
         ["Failed", s.failedCount, s.failedCount > 0 ? "danger" : ""]
@@ -410,8 +507,8 @@ function htmlPage(): string {
     }
     function positionsHtml(items) {
       if (!items || items.length === 0) return '<div class="mini">No open positions</div>';
-      return '<table><thead><tr><th>Symbol</th><th>Mint</th><th>Raw</th><th>Dec</th><th>Cost Lamports</th></tr></thead><tbody>' +
-        items.map((p) => \`<tr><td>\${esc(p.symbol)}</td><td class="mono">\${esc(p.mint)}</td><td class="mono">\${esc(p.rawAmount)}</td><td>\${esc(p.decimals)}</td><td class="mono">\${esc(p.costLamports)}</td></tr>\`).join("") +
+      return '<table><thead><tr><th>Symbol</th><th>Qty</th><th>Px(USD)</th><th>Value(USD)</th><th>Unrealized(USD)</th></tr></thead><tbody>' +
+        items.map((p) => \`<tr><td>\${esc(p.symbol)}</td><td class="mono">\${fmt(p.quantity, 6)}</td><td>\$ \${fmt(p.latestPriceUsd, 6)}</td><td>\$ \${fmt(p.marketValueUsd, 2)}</td><td class="\${p.unrealizedPnlUsd >= 0 ? "ok" : "danger"}">\$ \${money(p.unrealizedPnlUsd)}</td></tr>\`).join("") +
         "</tbody></table>";
     }
     function queuesHtml(q) {

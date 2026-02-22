@@ -215,6 +215,13 @@ export class AgentLoop {
       slippageBps: intent.slippageBps,
     };
 
+    if (!config.runtime.walletMcp.enabled && !config.paperTrade) {
+      log.error(
+        "Live trading requires wallet-mcp. Enable RUNTIME_WALLET_MCP_ENABLED or set PAPER_TRADE=true."
+      );
+      return buildRejectedResult(intent, "Live trading requires wallet-mcp to be enabled");
+    }
+
     const result = config.runtime.walletMcp.enabled
       ? await executeTradeViaWalletMcp(intent.id, order)
       : await this.chains[0].executeTrade(order);
