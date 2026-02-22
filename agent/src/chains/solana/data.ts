@@ -4,11 +4,6 @@ import { config } from "../../config/index.js";
 
 const log = createLogger("solana:data");
 
-function getJupiterHeaders(): HeadersInit | undefined {
-  if (!config.jupiter.apiKey) return undefined;
-  return { "x-api-key": config.jupiter.apiKey };
-}
-
 function buildJupiterPriceUrl(ids: string[]): string {
   const url = new URL(`${config.jupiter.baseUrl}/price/v3`);
   url.searchParams.set("ids", ids.join(","));
@@ -16,9 +11,7 @@ function buildJupiterPriceUrl(ids: string[]): string {
 }
 
 async function fetchJupiterPrices(ids: string[]): Promise<Record<string, number>> {
-  const res = await fetch(buildJupiterPriceUrl(ids), {
-    headers: getJupiterHeaders(),
-  });
+  const res = await fetch(buildJupiterPriceUrl(ids));
 
   if (!res.ok) {
     const text = (await res.text()).slice(0, 200);

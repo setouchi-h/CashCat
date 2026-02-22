@@ -178,11 +178,6 @@ function calcPositionPnlPct(
   return marketValueUsd / costBasisUsd - 1;
 }
 
-function getJupiterHeaders(): HeadersInit | undefined {
-  if (!config.jupiter.apiKey) return undefined;
-  return { "x-api-key": config.jupiter.apiKey };
-}
-
 function buildPriceUrl(mints: string[]): string {
   const url = new URL(`${config.jupiter.baseUrl}/price/v3`);
   url.searchParams.set("ids", mints.join(","));
@@ -202,9 +197,7 @@ function toNumber(value: unknown): number {
 async function fetchPricesUsd(mints: string[]): Promise<Record<string, number>> {
   if (mints.length === 0) return {};
 
-  const response = await fetch(buildPriceUrl(mints), {
-    headers: getJupiterHeaders(),
-  });
+  const response = await fetch(buildPriceUrl(mints));
   if (!response.ok) {
     const body = (await response.text()).slice(0, 200);
     throw new Error(`Jupiter price failed: ${response.status} ${body}`);

@@ -94,12 +94,8 @@ export const config = {
       : "https://api.mainnet-beta.solana.com",
   },
   jupiter: {
-    apiKey: parseOptional(process.env.JUPITER_API_KEY) ?? "",
     baseUrl:
-      parseOptional(process.env.JUPITER_API_BASE_URL) ??
-      (parseOptional(process.env.JUPITER_API_KEY)
-        ? "https://api.jup.ag"
-        : "https://lite-api.jup.ag"),
+      parseOptional(process.env.JUPITER_API_BASE_URL) ?? "https://lite-api.jup.ag",
   },
   paperTrade: process.env.PAPER_TRADE !== "false",
   scanIntervalSeconds: Number(process.env.SCAN_INTERVAL_SECONDS) || 20,

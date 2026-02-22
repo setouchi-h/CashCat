@@ -215,16 +215,14 @@ export class AgentLoop {
       slippageBps: intent.slippageBps,
     };
 
-    if (!config.runtime.walletMcp.enabled && !config.paperTrade) {
+    if (!config.runtime.walletMcp.enabled) {
       log.error(
-        "Live trading requires wallet-mcp. Enable RUNTIME_WALLET_MCP_ENABLED or set PAPER_TRADE=true."
+        "Trading requires wallet-mcp. Enable RUNTIME_WALLET_MCP_ENABLED."
       );
-      return buildRejectedResult(intent, "Live trading requires wallet-mcp to be enabled");
+      return buildRejectedResult(intent, "wallet-mcp must be enabled for trading");
     }
 
-    const result = config.runtime.walletMcp.enabled
-      ? await executeTradeViaWalletMcp(intent.id, order)
-      : await this.chains[0].executeTrade(order);
+    const result = await executeTradeViaWalletMcp(intent.id, order);
     const now = new Date().toISOString();
 
     const executionResult: ExecutionResult = {
@@ -241,7 +239,7 @@ export class AgentLoop {
     this.tracker.recordTrade({
       id: `${intent.id}-${Date.now()}`,
       timestamp: now,
-      chain: config.runtime.walletMcp.enabled ? "solana-mcp" : this.chains[0].name,
+      chain: "solana-mcp",
       action: intent.action,
       tokenSymbol: inferTokenSymbol(intent),
       tokenAddress: intent.outputMint,
