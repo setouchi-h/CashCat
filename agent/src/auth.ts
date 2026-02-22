@@ -2,7 +2,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
-import { createLogger } from "../utils/logger.js";
+import { createLogger } from "./logger.js";
 
 const log = createLogger("oauth");
 
@@ -19,7 +19,7 @@ const TOKEN_FILE = path.join(
   "openai-tokens.json"
 );
 
-interface StoredTokens {
+export interface StoredTokens {
   access_token: string;
   refresh_token: string;
   expires_at: number;

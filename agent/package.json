@@ -5,13 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "dev:ui": "tsx watch src/ui/server.ts",
+    "dev:ui": "tsx watch src/ui.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "start:ui": "node dist/ui/server.js"
+    "start:ui": "node dist/ui.js"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.98.0",
     "dotenv": "^16.4.7"
   },
   "devDependencies": {

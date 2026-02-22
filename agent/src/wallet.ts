@@ -1,9 +1,26 @@
 import { spawn } from "node:child_process";
-import type { TradeOrder, TradeResult } from "../chains/types.js";
-import { config } from "../config/index.js";
-import { createLogger } from "../utils/logger.js";
+import { config } from "./config.js";
+import { createLogger } from "./logger.js";
+import type { TradeResult } from "./state.js";
 
-const log = createLogger("runtime:wallet-mcp");
+const log = createLogger("wallet-mcp");
+
+export interface TradeOrder {
+  action: "buy" | "sell";
+  inputMint: string;
+  outputMint: string;
+  amountLamports: number;
+  slippageBps: number;
+}
+
+export interface WalletBalance {
+  lamports: string;
+  sol: string;
+}
+
+// ---------------------------------------------------------------------------
+// JSON-RPC framing
+// ---------------------------------------------------------------------------
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -33,48 +50,11 @@ interface WalletExecuteResult {
   reason?: string;
 }
 
-function writeFrame(
-  writer: NodeJS.WritableStream,
-  payload: JsonRpcRequest
-): void {
+function writeFrame(writer: NodeJS.WritableStream, payload: JsonRpcRequest): void {
   const body = Buffer.from(JSON.stringify(payload), "utf8");
   const header = Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, "utf8");
   writer.write(header);
   writer.write(body);
-}
-
-function extractResultPayload(value: unknown): WalletExecuteResult {
-  if (!value || typeof value !== "object") {
-    throw new Error("Invalid tools/call response");
-  }
-
-  const obj = value as {
-    isError?: unknown;
-    content?: unknown;
-  };
-
-  const content = Array.isArray(obj.content) ? obj.content : [];
-  const first = content[0] as { text?: unknown } | undefined;
-  const text = typeof first?.text === "string" ? first.text : "";
-  if (!text) {
-    throw new Error("wallet_execute_swap returned empty content");
-  }
-
-  let parsed: unknown = text;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    // keep raw text when tool returned plain text
-  }
-
-  if (typeof parsed === "string") {
-    return { status: obj.isError ? "failed" : "filled", error: parsed };
-  }
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("wallet_execute_swap returned invalid payload");
-  }
-
-  return parsed as WalletExecuteResult;
 }
 
 function parseFrames(
@@ -117,23 +97,52 @@ function parseFrames(
   return { rest: cursor, messages };
 }
 
-export interface WalletBalance {
-  lamports: string;
-  sol: string;
+function extractResultPayload(value: unknown): WalletExecuteResult {
+  if (!value || typeof value !== "object") {
+    throw new Error("Invalid tools/call response");
+  }
+
+  const obj = value as { isError?: unknown; content?: unknown };
+  const content = Array.isArray(obj.content) ? obj.content : [];
+  const first = content[0] as { text?: unknown } | undefined;
+  const text = typeof first?.text === "string" ? first.text : "";
+  if (!text) {
+    throw new Error("wallet_execute_swap returned empty content");
+  }
+
+  let parsed: unknown = text;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // keep raw text when tool returned plain text
+  }
+
+  if (typeof parsed === "string") {
+    return { status: obj.isError ? "failed" : "filled", error: parsed };
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("wallet_execute_swap returned invalid payload");
+  }
+
+  return parsed as WalletExecuteResult;
 }
 
-export async function getBalanceViaWalletMcp(): Promise<WalletBalance> {
-  if (!config.runtime.walletMcp.enabled) {
+// ---------------------------------------------------------------------------
+// getBalance
+// ---------------------------------------------------------------------------
+
+export async function getBalance(): Promise<WalletBalance> {
+  if (!config.walletMcp.enabled) {
     throw new Error("wallet-mcp is disabled");
   }
 
-  const command = config.runtime.walletMcp.command.trim();
+  const command = config.walletMcp.command.trim();
   if (!command) {
     throw new Error("RUNTIME_WALLET_MCP_COMMAND is empty");
   }
 
-  const cwd = config.runtime.walletMcp.cwd.trim() || process.cwd();
-  const timeoutMs = Math.max(5, config.runtime.walletMcp.timeoutSeconds) * 1000;
+  const cwd = config.walletMcp.cwd.trim() || process.cwd();
+  const timeoutMs = Math.max(5, config.walletMcp.timeoutSeconds) * 1000;
 
   return await new Promise<WalletBalance>((resolve, reject) => {
     const child = spawn("zsh", ["-lc", command], {
@@ -244,20 +253,21 @@ export async function getBalanceViaWalletMcp(): Promise<WalletBalance> {
       params: {
         protocolVersion: "2024-11-05",
         capabilities: {},
-        clientInfo: {
-          name: "cashcat-agent",
-          version: "0.1.0",
-        },
+        clientInfo: { name: "cashcat-agent", version: "0.1.0" },
       },
     });
   });
 }
 
-export async function executeTradeViaWalletMcp(
+// ---------------------------------------------------------------------------
+// executeSwap
+// ---------------------------------------------------------------------------
+
+export async function executeSwap(
   intentId: string,
   order: TradeOrder
 ): Promise<TradeResult> {
-  if (!config.runtime.walletMcp.enabled) {
+  if (!config.walletMcp.enabled) {
     return {
       success: false,
       inputAmount: String(order.amountLamports),
@@ -266,7 +276,7 @@ export async function executeTradeViaWalletMcp(
     };
   }
 
-  const command = config.runtime.walletMcp.command.trim();
+  const command = config.walletMcp.command.trim();
   if (!command) {
     return {
       success: false,
@@ -276,8 +286,8 @@ export async function executeTradeViaWalletMcp(
     };
   }
 
-  const cwd = config.runtime.walletMcp.cwd.trim() || process.cwd();
-  const timeoutMs = Math.max(5, config.runtime.walletMcp.timeoutSeconds) * 1000;
+  const cwd = config.walletMcp.cwd.trim() || process.cwd();
+  const timeoutMs = Math.max(5, config.walletMcp.timeoutSeconds) * 1000;
 
   return await new Promise<TradeResult>((resolve) => {
     const child = spawn("zsh", ["-lc", command], {
@@ -408,7 +418,6 @@ export async function executeTradeViaWalletMcp(
 
     child.on("close", (code) => {
       if (done) return;
-
       const stderrTail = stderr.trim() ? ` | stderr=${stderr.trim()}` : "";
       finish({
         success: false,
@@ -425,10 +434,7 @@ export async function executeTradeViaWalletMcp(
       params: {
         protocolVersion: "2024-11-05",
         capabilities: {},
-        clientInfo: {
-          name: "cashcat-agent",
-          version: "0.1.0",
-        },
+        clientInfo: { name: "cashcat-agent", version: "0.1.0" },
       },
     });
   });
