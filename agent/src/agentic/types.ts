@@ -13,6 +13,7 @@ export interface AgenticPosition {
 export interface AgenticState {
   cycle: number;
   cashLamports: string;
+  initialCashLamports?: string;
   realizedPnlLamports: string;
   positions: Record<string, AgenticPosition>;
   marketHistory: Record<string, { ts: number; priceUsd: number }[]>;

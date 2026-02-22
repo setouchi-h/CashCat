@@ -326,7 +326,14 @@ async function loadSnapshot(): Promise<Snapshot> {
         0
       );
       equityUsd = cashUsd + positionValueUsd;
-      initialEquityUsd = config.runtime.agentic.initialCashSol * solPriceUsd;
+      const initialCashLamportsStr =
+        typeof state.initialCashLamports === "string" && state.initialCashLamports
+          ? state.initialCashLamports
+          : undefined;
+      const initialCashSol = initialCashLamportsStr
+        ? lamportsToSol(initialCashLamportsStr)
+        : config.runtime.agentic.initialCashSol;
+      initialEquityUsd = initialCashSol * solPriceUsd;
       totalPnlUsd = equityUsd - initialEquityUsd;
       totalPnlPct =
         initialEquityUsd > 0 ? (totalPnlUsd / initialEquityUsd) * 100 : 0;

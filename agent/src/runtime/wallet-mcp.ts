@@ -117,6 +117,142 @@ function parseFrames(
   return { rest: cursor, messages };
 }
 
+export interface WalletBalance {
+  lamports: string;
+  sol: string;
+}
+
+export async function getBalanceViaWalletMcp(): Promise<WalletBalance> {
+  if (!config.runtime.walletMcp.enabled) {
+    throw new Error("wallet-mcp is disabled");
+  }
+
+  const command = config.runtime.walletMcp.command.trim();
+  if (!command) {
+    throw new Error("RUNTIME_WALLET_MCP_COMMAND is empty");
+  }
+
+  const cwd = config.runtime.walletMcp.cwd.trim() || process.cwd();
+  const timeoutMs = Math.max(5, config.runtime.walletMcp.timeoutSeconds) * 1000;
+
+  return await new Promise<WalletBalance>((resolve, reject) => {
+    const child = spawn("zsh", ["-lc", command], {
+      cwd,
+      env: process.env,
+      stdio: "pipe",
+    });
+
+    const initRequestId = 1;
+    const toolCallRequestId = 2;
+    let done = false;
+    let stdoutBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+    let stderr = "";
+
+    const finish = (result: WalletBalance | Error): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      child.kill("SIGTERM");
+      if (result instanceof Error) {
+        reject(result);
+      } else {
+        resolve(result);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      finish(new Error(`wallet-mcp balance call timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk: Buffer<ArrayBufferLike>) => {
+      stdoutBuffer = Buffer.concat([stdoutBuffer, chunk]);
+      const parsed = parseFrames(stdoutBuffer);
+      stdoutBuffer = parsed.rest;
+
+      for (const message of parsed.messages) {
+        if (done) return;
+        if (typeof message.id !== "number") continue;
+
+        if (message.id === initRequestId) {
+          if (message.error) {
+            finish(new Error(`wallet-mcp initialize failed: ${message.error.message}`));
+            return;
+          }
+
+          writeFrame(child.stdin, {
+            jsonrpc: "2.0",
+            method: "notifications/initialized",
+          });
+
+          writeFrame(child.stdin, {
+            jsonrpc: "2.0",
+            id: toolCallRequestId,
+            method: "tools/call",
+            params: {
+              name: "wallet_get_balance",
+              arguments: { chain: "solana" },
+            },
+          });
+          continue;
+        }
+
+        if (message.id === toolCallRequestId) {
+          if (message.error) {
+            finish(new Error(`wallet_get_balance RPC error: ${message.error.message}`));
+            return;
+          }
+
+          try {
+            const value = message.result as {
+              content?: Array<{ text?: string }>;
+            };
+            const text = value?.content?.[0]?.text ?? "";
+            if (!text) {
+              finish(new Error("wallet_get_balance returned empty content"));
+              return;
+            }
+            const payload = JSON.parse(text) as Record<string, unknown>;
+            const lamports = String(payload.lamports ?? "0");
+            const sol = String(payload.sol ?? String(Number(lamports) / 1_000_000_000));
+            finish({ lamports, sol });
+          } catch (e) {
+            finish(new Error(`wallet_get_balance parse error: ${e instanceof Error ? e.message : String(e)}`));
+          }
+          return;
+        }
+      }
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += String(chunk);
+    });
+
+    child.on("error", (e) => {
+      finish(new Error(`wallet-mcp spawn failed: ${e instanceof Error ? e.message : String(e)}`));
+    });
+
+    child.on("close", (code) => {
+      if (done) return;
+      const stderrTail = stderr.trim() ? ` | stderr=${stderr.trim()}` : "";
+      finish(new Error(`wallet-mcp exited before response (code=${code})${stderrTail}`));
+    });
+
+    writeFrame(child.stdin, {
+      jsonrpc: "2.0",
+      id: initRequestId,
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: {
+          name: "cashcat-agent",
+          version: "0.1.0",
+        },
+      },
+    });
+  });
+}
+
 export async function executeTradeViaWalletMcp(
   intentId: string,
   order: TradeOrder

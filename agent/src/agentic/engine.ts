@@ -14,6 +14,7 @@ import type {
   PlannedIntents,
 } from "./types.js";
 import { computeMomentumSignal } from "./signal.js";
+import { getBalanceViaWalletMcp } from "../runtime/wallet-mcp.js";
 import { loadAgenticState, saveAgenticState } from "./state.js";
 
 const log = createLogger("agentic");
@@ -825,9 +826,29 @@ export class AgenticEngine {
   private state: AgenticState | null = null;
 
   async init(): Promise<void> {
-    this.state = await loadAgenticState();
+    const isNew = !(await fs
+      .access(config.runtime.agentic.statePath)
+      .then(() => true)
+      .catch(() => false));
+
+    let realCashLamports: string | undefined;
+    if (isNew) {
+      try {
+        const balance = await getBalanceViaWalletMcp();
+        realCashLamports = balance.lamports;
+        log.info(
+          `Fetched wallet balance: ${balance.sol} SOL (${balance.lamports} lamports)`
+        );
+      } catch (e) {
+        log.warn(
+          `Failed to fetch wallet balance, falling back to config: ${e instanceof Error ? e.message : String(e)}`
+        );
+      }
+    }
+
+    this.state = await loadAgenticState(realCashLamports);
     log.info(
-      `Loaded state: cycle=${this.state.cycle}, positions=${Object.keys(
+      `Loaded state: cycle=${this.state.cycle}, cash=${this.state.cashLamports} lamports, positions=${Object.keys(
         this.state.positions
       ).length}`
     );

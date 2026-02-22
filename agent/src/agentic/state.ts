@@ -33,10 +33,12 @@ function sanitizePosition(position: AgenticPosition): AgenticPosition {
   };
 }
 
-function buildInitialState(): AgenticState {
+function buildInitialState(realCashLamports?: string): AgenticState {
+  const cash = realCashLamports ?? initialCashLamports();
   return {
     cycle: 0,
-    cashLamports: initialCashLamports(),
+    cashLamports: cash,
+    initialCashLamports: cash,
     realizedPnlLamports: "0",
     positions: {},
     marketHistory: {},
@@ -68,6 +70,9 @@ function sanitizeState(state: AgenticState): AgenticState {
   return {
     cycle: Number.isFinite(state.cycle) ? Math.max(0, Math.floor(state.cycle)) : 0,
     cashLamports: normalizeBigintString(state.cashLamports),
+    initialCashLamports: state.initialCashLamports
+      ? normalizeBigintString(state.initialCashLamports)
+      : undefined,
     realizedPnlLamports: normalizeBigintString(state.realizedPnlLamports),
     positions,
     marketHistory,
@@ -88,13 +93,13 @@ async function ensureStateDir(): Promise<void> {
   await fs.mkdir(path.dirname(config.runtime.agentic.statePath), { recursive: true });
 }
 
-export async function loadAgenticState(): Promise<AgenticState> {
+export async function loadAgenticState(realCashLamports?: string): Promise<AgenticState> {
   await ensureStateDir();
   const raw = await fs
     .readFile(config.runtime.agentic.statePath, "utf8")
     .catch(() => "");
   if (!raw) {
-    const initial = buildInitialState();
+    const initial = buildInitialState(realCashLamports);
     await saveAgenticState(initial);
     return initial;
   }
@@ -103,7 +108,7 @@ export async function loadAgenticState(): Promise<AgenticState> {
     const parsed = JSON.parse(raw) as AgenticState;
     return sanitizeState(parsed);
   } catch {
-    const initial = buildInitialState();
+    const initial = buildInitialState(realCashLamports);
     await saveAgenticState(initial);
     return initial;
   }
