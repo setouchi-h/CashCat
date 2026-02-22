@@ -261,6 +261,9 @@ export async function executeSwap(params: {
         quoteResponse: resolvedQuote.quoteResponse,
         userPublicKey: wallet.publicKey.toBase58(),
         wrapAndUnwrapSol: true,
+        dynamicComputeUnitLimit: true,
+        dynamicSlippage: { maxBps: config.policy.maxSlippageBps },
+        prioritizationFeeLamports: "auto",
       }),
     });
 
