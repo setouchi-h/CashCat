@@ -264,7 +264,7 @@ export function applySell(
   const remainingRaw = rawAmount - soldRaw;
   const remainingCost = costLamports - allocatedCost;
 
-  const dustThreshold = rawAmount / 200n;
+  const dustThreshold = rawAmount / 100n;
   if (remainingRaw <= 0n || remainingRaw <= dustThreshold) {
     delete state.positions[intent.inputMint];
   } else {

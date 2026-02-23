@@ -133,6 +133,16 @@ export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
     const rawAmount = toBigint(position.rawAmount);
     const costLamports = toBigint(position.costLamports);
 
+    // Remove dust positions too small for Jupiter to execute
+    if (tokenPrice > 0 && position.decimals >= 0) {
+      const valueUsd = (Number(rawAmount) / 10 ** position.decimals) * tokenPrice;
+      if (valueUsd < 0.01) {
+        log.info(`[StopLoss] ${position.symbol}: removing dust position ($${valueUsd.toFixed(6)})`);
+        delete state.positions[mint];
+        continue;
+      }
+    }
+
     const pnlPct = calcPositionPnlPct(
       costLamports,
       rawAmount,
