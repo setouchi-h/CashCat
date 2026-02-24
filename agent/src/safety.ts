@@ -133,12 +133,11 @@ export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
     const rawAmount = toBigint(position.rawAmount);
     const costLamports = toBigint(position.costLamports);
 
-    // Remove dust positions too small for Jupiter to execute
+    // Skip dust positions too small for Jupiter to execute (keep tracked for recovery)
     if (tokenPrice > 0 && position.decimals >= 0) {
       const valueUsd = (Number(rawAmount) / 10 ** position.decimals) * tokenPrice;
-      if (valueUsd < 0.01) {
-        log.info(`[StopLoss] ${position.symbol}: removing dust position ($${valueUsd.toFixed(6)})`);
-        delete state.positions[mint];
+      if (valueUsd < config.minTradeValueUsd) {
+        log.debug(`[StopLoss] ${position.symbol}: skipping dust position ($${valueUsd.toFixed(6)} < $${config.minTradeValueUsd})`);
         continue;
       }
     }
@@ -161,6 +160,15 @@ export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
 
     const sellRaw = calcSellRaw(rawAmount);
     if (sellRaw <= 0n) continue;
+
+    // Skip sell intent if the sell amount value is below minimum trade threshold
+    if (tokenPrice > 0 && position.decimals >= 0) {
+      const sellValueUsd = (Number(sellRaw) / 10 ** position.decimals) * tokenPrice;
+      if (sellValueUsd < config.minTradeValueUsd) {
+        log.info(`[StopLoss] ${position.symbol}: skipping sell, value $${sellValueUsd.toFixed(4)} below min $${config.minTradeValueUsd}`);
+        continue;
+      }
+    }
 
     const reason = isStopLoss
       ? `stop-loss pnl=${(pnlPct * 100).toFixed(2)}%`

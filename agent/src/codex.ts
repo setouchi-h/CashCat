@@ -156,6 +156,27 @@ function resolveToken(decision: CodexDecision): { mint: string; symbol: string; 
   return { mint, symbol: symbol || mint.slice(0, 6), decimals };
 }
 
+async function fetchPricesUsd(mints: string[]): Promise<Record<string, number>> {
+  if (mints.length === 0) return {};
+  try {
+    const url = new URL(`${config.jupiter.baseUrl}/price/v3`);
+    url.searchParams.set("ids", mints.join(","));
+    const res = await fetch(url.toString());
+    if (!res.ok) return {};
+    const payload = (await res.json()) as Record<string, unknown>;
+    const data = (payload?.data ?? payload) as Record<string, unknown>;
+    const prices: Record<string, number> = {};
+    for (const mint of mints) {
+      const row = data[mint] as Record<string, unknown> | undefined;
+      const price = toNumber(row?.usdPrice ?? row?.price ?? row?.priceUsd ?? row?.value);
+      prices[mint] = price > 0 ? price : 0;
+    }
+    return prices;
+  } catch {
+    return {};
+  }
+}
+
 function extractFirstJsonObject(text: string): string | null {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -405,7 +426,10 @@ export async function invokeCodex(
     await fs.rm(tmpDir, { recursive: true, force: true });
   }
 
-  return normalizeCodexOutput(raw, state, now);
+  const positionMints = Object.keys(state.positions);
+  const prices = await fetchPricesUsd([SOL_MINT, ...positionMints]);
+  const solPriceUsd = prices[SOL_MINT] ?? 0;
+  return normalizeCodexOutput(raw, state, now, solPriceUsd, prices);
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +439,9 @@ export async function invokeCodex(
 function normalizeCodexOutput(
   output: CodexOutput,
   state: State,
-  now: Date
+  now: Date,
+  solPriceUsd: number,
+  prices: Record<string, number>
 ): { intents: TradeIntent[]; notes: string[] } {
   const notes: string[] = [];
   const modelNotes = Array.isArray(output.notes)
@@ -489,6 +515,20 @@ function normalizeCodexOutput(
     // sell
     const position = state.positions[token.mint];
     if (!position) continue;
+
+    // Skip sell if position market value is below minimum trade threshold
+    const tokenPriceUsd = prices[token.mint] ?? 0;
+    if (tokenPriceUsd > 0 && position.decimals >= 0) {
+      const heldRaw = toBigint(position.rawAmount);
+      const valueUsd = (Number(heldRaw) / 10 ** position.decimals) * tokenPriceUsd;
+      if (valueUsd < config.minTradeValueUsd) {
+        notes.push(
+          `[Codex] SKIP SELL ${token.symbol}: market value $${valueUsd.toFixed(4)} below min $${config.minTradeValueUsd}`
+        );
+        continue;
+      }
+    }
+
     const heldRaw = toBigint(position.rawAmount);
     const sellRaw = normalizeSellRaw(decision.amountLamports, heldRaw);
     if (sellRaw <= 0n) continue;
