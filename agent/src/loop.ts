@@ -167,6 +167,30 @@ export async function runLoop(signal: AbortSignal): Promise<void> {
     if (!signal.aborted) {
       const release = await mutex.acquire();
       try {
+        // Sync wallet SOL balance with state
+        try {
+          const balance = await getBalance();
+          const walletLamports = BigInt(balance.lamports);
+          const stateLamports = BigInt(state.cashLamports);
+          const diff = walletLamports - stateLamports;
+          const absDiff = diff < 0n ? -diff : diff;
+
+          if (absDiff > 1_000_000n) {
+            state.cashLamports = walletLamports.toString();
+            const initialLamports = BigInt(state.initialCashLamports ?? state.cashLamports);
+            state.initialCashLamports = (initialLamports + diff).toString();
+
+            const diffSol = Number(diff) / 1_000_000_000;
+            if (diff > 0n) {
+              log.info(`Deposit detected: +${diffSol.toFixed(4)} SOL — cashLamports synced to wallet`);
+            } else {
+              log.info(`Withdrawal detected: ${diffSol.toFixed(4)} SOL — cashLamports synced to wallet`);
+            }
+          }
+        } catch {
+          // getBalance failed — skip sync, continue with stale cashLamports
+        }
+
         const { intents, notes } = await invokeCodex(state, new Date());
         for (const note of notes) {
           log.info(note);
