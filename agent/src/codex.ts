@@ -84,24 +84,17 @@ function makeIntentId(symbol: string, action: "buy" | "sell"): string {
 function calcBuyLamports(cashLamports: bigint): bigint {
   if (cashLamports <= 0n) return 0n;
   const minLamports = BigInt(Math.floor(config.minTradeSol * 1_000_000_000));
-  const maxLamports = BigInt(Math.floor(config.maxTradeSol * 1_000_000_000));
-
-  // Default: use maxTradeSol as default buy size, clamped to cash
-  let amount = maxLamports;
-  if (amount > cashLamports) amount = cashLamports;
-  if (amount < minLamports) return 0n;
-  return amount;
+  if (cashLamports < minLamports) return 0n;
+  return cashLamports;
 }
 
 function normalizeBuyLamports(requested: unknown, cashLamports: bigint): bigint {
   const minLamports = BigInt(Math.floor(config.minTradeSol * 1_000_000_000));
-  const maxLamports = BigInt(Math.floor(config.maxTradeSol * 1_000_000_000));
 
   const requestedInt = toPositiveInteger(requested);
   let amount = requestedInt !== null ? BigInt(requestedInt) : calcBuyLamports(cashLamports);
 
   if (amount < minLamports) amount = minLamports;
-  if (amount > maxLamports) amount = maxLamports;
   if (amount > cashLamports) amount = cashLamports;
   if (amount < minLamports) return 0n;
   return amount;
@@ -312,7 +305,7 @@ Returns JSON: { data: { "<mint>": { usdPrice: number } } }
 
 == Hard Constraints ==
 - Max intents per cycle: ${config.maxIntentsPerCycle}
-- Min trade: ${config.minTradeSol} SOL, max trade: ${config.maxTradeSol} SOL
+- Min trade: ${config.minTradeSol} SOL
 - Max open positions: ${config.maxOpenPositions}
 - Max slippage: ${config.maxSlippageBps} bps, default slippage: ${config.intentSlippageBps} bps
 - Stop-loss / take-profit / timeout are handled by the engine automatically. Do NOT generate stop-loss sells.

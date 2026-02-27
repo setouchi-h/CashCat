@@ -38,7 +38,6 @@ export const config = {
   maxHoldMinutes: Math.max(5, Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MAX_HOLD_MINUTES, 480))),
   maxOpenPositions: Math.max(1, Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MAX_OPEN_POSITIONS, 5))),
   minTradeSol: Math.max(0.001, parseNumber(process.env.RUNTIME_AGENTIC_MIN_TRADE_SOL, 0.1)),
-  maxTradeSol: Math.max(0.001, parseNumber(process.env.RUNTIME_AGENTIC_MAX_TRADE_SOL, 3)),
   minTradeValueUsd: Math.max(0.01, parseNumber(process.env.RUNTIME_AGENTIC_MIN_TRADE_VALUE_USD, 1.0)),
   sellFraction: clamp(parseNumber(process.env.RUNTIME_AGENTIC_SELL_FRACTION, 1), 0.05, 1),
   intentSlippageBps: Math.max(1, Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_INTENT_SLIPPAGE_BPS, 100))),
