@@ -41,10 +41,6 @@ export const config = {
   paperTrade: process.env.PAPER_TRADE !== "false",
   policy: {
     killSwitch: process.env.WALLET_MCP_KILL_SWITCH === "true",
-    maxAmountLamports: parsePositiveInteger(
-      process.env.WALLET_MCP_MAX_AMOUNT_LAMPORTS,
-      50_000_000_000
-    ),
     maxSlippageBps: parsePositiveInteger(
       process.env.WALLET_MCP_MAX_SLIPPAGE_BPS,
       300

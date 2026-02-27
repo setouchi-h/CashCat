@@ -33,7 +33,6 @@ pnpm --filter wallet-mcp dev
 - Advanced overrides (optional, defaults are in code):
   - `JUPITER_API_BASE_URL`
   - `WALLET_MCP_KILL_SWITCH`
-  - `WALLET_MCP_MAX_AMOUNT_LAMPORTS`
   - `WALLET_MCP_MAX_SLIPPAGE_BPS`
   - `WALLET_MCP_ALLOWED_INPUT_MINTS`
   - `WALLET_MCP_ALLOWED_OUTPUT_MINTS`

@@ -211,10 +211,6 @@ export function validateIntent(intent: TradeIntent): string | null {
     return "amountLamports must be positive";
   }
 
-  if (intent.amountLamports > config.maxAmountLamports) {
-    return `amountLamports exceeds max (${config.maxAmountLamports})`;
-  }
-
   if (!intent.slippageBps || intent.slippageBps < 1) {
     return "slippageBps must be positive";
   }

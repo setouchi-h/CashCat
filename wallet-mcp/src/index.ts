@@ -464,7 +464,7 @@ async function main(): Promise<void> {
     })`
   );
   log.info(
-    `Policy killSwitch=${config.policy.killSwitch} maxAmount=${config.policy.maxAmountLamports} maxSlippage=${config.policy.maxSlippageBps}`
+    `Policy killSwitch=${config.policy.killSwitch} maxSlippage=${config.policy.maxSlippageBps}`
   );
 
   process.stdin.on("data", (chunk: Buffer) => {

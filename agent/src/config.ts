@@ -32,7 +32,6 @@ export const config = {
     timeoutSeconds: Number(process.env.RUNTIME_WALLET_MCP_TIMEOUT_SECONDS) || 45,
   },
   killSwitch: process.env.RUNTIME_KILL_SWITCH === "true",
-  maxAmountLamports: Number(process.env.RUNTIME_MAX_AMOUNT_LAMPORTS) || 50_000_000_000,
   maxSlippageBps: Number(process.env.RUNTIME_MAX_SLIPPAGE_BPS) || 300,
   stopLossPct: parseNumber(process.env.RUNTIME_AGENTIC_STOP_LOSS_PCT, -0.10),
   takeProfitPct: parseNumber(process.env.RUNTIME_AGENTIC_TAKE_PROFIT_PCT, 0.15),

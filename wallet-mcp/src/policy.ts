@@ -34,9 +34,6 @@ export function validateSwapPolicy(input: SwapPolicyInput): string | null {
   if (!Number.isInteger(input.amountLamports) || input.amountLamports <= 0) {
     return "amountLamports must be a positive integer";
   }
-  if (input.amountLamports > config.policy.maxAmountLamports) {
-    return `amountLamports exceeds maxAmountLamports (${config.policy.maxAmountLamports})`;
-  }
   if (!Number.isInteger(input.slippageBps) || input.slippageBps <= 0) {
     return "slippageBps must be a positive integer";
   }
