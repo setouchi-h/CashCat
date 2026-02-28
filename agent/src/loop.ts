@@ -157,6 +157,11 @@ export async function runLoop(signal: AbortSignal): Promise<void> {
     await fs.writeFile(observationsPath, "# Market Observations\n\n## Summary\n\n(No compacted summaries yet)\n\n## Recent\n\n(No observations yet)\n");
   }
 
+  const strategyPath = path.resolve("strategy.md");
+  try { await fs.access(strategyPath); } catch {
+    await fs.writeFile(strategyPath, "# CashCat Trading Strategy\n\n(Codex reads and writes this file to evolve its trading strategy)\n(RULES: Only write durable rules and lessons here. Per-cycle market data goes in observations.md. Keep under 50 lines.)\n\n## Entry Rules\n\n## Exit Rules\n\n(The engine automatically handles stop-loss/take-profit/timeout)\n\n## Token Watchlist\n\n## Lessons Learned\n");
+  }
+
   startDashboard();
 
   const mutex = createMutex();
@@ -197,6 +202,29 @@ export async function runLoop(signal: AbortSignal): Promise<void> {
         } catch {
           // getBalance failed — skip sync, continue with stale cashLamports
         }
+
+        // Safety net: trim observations.md if it grew too large (Codex should compact, but may miss)
+        try {
+          const obsContent = await fs.readFile(observationsPath, "utf8");
+          const obsLines = obsContent.split("\n");
+          if (obsLines.length > 200) {
+            log.warn(`observations.md has ${obsLines.length} lines (>200), trimming Recent section`);
+            const recentIdx = obsContent.indexOf("## Recent");
+            if (recentIdx !== -1) {
+              const beforeRecent = obsContent.slice(0, recentIdx);
+              const recentSection = obsContent.slice(recentIdx);
+              const entries = recentSection.split(/(?=^### Cycle )/m);
+              const header = entries[0]; // "## Recent\n"
+              const cycleEntries = entries.slice(1);
+              if (cycleEntries.length > 15) {
+                const kept = cycleEntries.slice(-10);
+                const trimmed = beforeRecent + header + kept.join("");
+                await fs.writeFile(observationsPath, trimmed);
+                log.info(`Trimmed observations.md: kept last 10 of ${cycleEntries.length} entries`);
+              }
+            }
+          }
+        } catch { /* non-fatal */ }
 
         const { intents, notes } = await invokeCodex(state, new Date());
         for (const note of notes) {

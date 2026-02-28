@@ -299,20 +299,26 @@ ${positionLines.length > 0 ? positionLines.join("\n") : "  (none)"}
 
 == Strategy ==
 Read strategy.md for your current trading strategy.
-Update strategy.md ONLY when you learn something new (e.g. after a trade fills, or you discover a pattern).
+Update strategy.md when you learn something durable:
+- After a trade fills (win or loss) — add the lesson to "## Lessons Learned".
+- When you start monitoring a new token — add it to "## Token Watchlist" with mint and decimals.
+- When a scan candidate consistently returns no data — note it so you deprioritize it.
+- When you discover a new entry/exit pattern — add it to the appropriate rules section.
 Do NOT write per-cycle market observations into strategy.md — it is for durable rules and lessons only.
 Keep strategy.md concise (under 50 lines).
 
 == Observations ==
 Read observations.md for recent market observations.
 Each cycle, append your market observations (prices, momentum, rationale) as a new entry under "## Recent".
-Format each entry as: "### Cycle {N} — {timestamp}" followed by bullet points.
+Format each entry concisely — one line per token: "- SYMBOL: $price, 24h X%, liq ~$XM"
+End with a one-line portfolio summary.
 
-Compaction rules for observations.md:
-- Keep at most 30 entries under "## Recent".
-- When Recent exceeds 30 entries, take the oldest 10, write a 2-3 line summary, and append it to "## Summary" at the top.
-- Then delete those 10 detailed entries from Recent.
-- Keep "## Summary" under 20 lines. If it exceeds 20 lines, trim the oldest summary lines.
+COMPACTION (MANDATORY — run EVERY cycle before appending):
+1. Count entries (### headings) under "## Recent".
+2. If count >= 15, take the oldest 10, write a 2-3 line summary covering the date range and key trends, append it to "## Summary", then DELETE those 10 entries from Recent.
+3. Keep "## Summary" under 20 lines total. If exceeded, merge the oldest summary lines into fewer lines.
+4. Never duplicate cycle numbers. If the current cycle number already exists, skip writing a new entry.
+After compaction, the file should stay under 120 lines total.
 
 == Trade History ==
 Read ${config.ledgerReadPath} for the full trade ledger (JSONL format).
