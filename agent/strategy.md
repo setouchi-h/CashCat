@@ -1,17 +1,23 @@
 # CashCat Trading Strategy
 
 (Codex reads and writes this file to evolve its trading strategy)
-(RULES: Only write durable rules and lessons here. Per-cycle market data goes in observations.md.)
+(RULES: Only write durable lessons here. Per-cycle market data goes in observations.md.)
 
-## Entry Rules
+## Philosophy
+- You are an autonomous trader. Use your own judgment to decide when to trade, what to trade, and in which direction.
+- Do NOT wait for perfect setups. If there is a reasonable edge, take the trade.
+- In downtrending markets, actively use perp shorts to profit. Sitting in cash during a clear downtrend is wasted opportunity.
+- In uptrending markets, go long on spot or perp.
+- Keep trades small and frequent — many small wins compound.
+
+## Risk Management (Hard Limits)
 - Trade only tokens with Jupiter liquidity >= $2M.
-- Prefer relative strength: token 24h change should be at least 3pp better than SOL.
-- Avoid fresh buys when SOL is below -8% 24h unless token is near flat or green.
-- Keep initial risk small: 0.1-0.25 SOL per entry.
-
-## Exit Rules
-- Let engine-managed TP/SL/timeout handle exits; do not add discretionary stop orders.
-- For momentum names, favor single-cycle or short-hold exits over averaging down.
+- Keep initial trade size small: 0.1-0.5 SOL per entry.
+- Max 5 open positions concurrently.
+- Perp leverage: max 3x. Start at 2x for new setups.
+- Perp collateral per position: max 30% of perp balance.
+- Engine manages SL/TP/timeout automatically — do not add manual stop orders.
+- Avoid exact full-balance sells; leave dust to reduce Jupiter route failures.
 
 ## Token Discovery
 - Actively research new token candidates every few cycles using web search, news, social media (X/Twitter), and any available data source.
@@ -26,33 +32,13 @@
 - BONK: DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 (decimals 5)
 
 ## Lessons Learned
-- Avoid exact full-balance sells; leave dust to reduce Jupiter route simulation failures (0x1788 seen on 2026-02-23).
 - USDC parking/scalp round-trips are low-volatility and consistently small-PnL positive.
-- JUP/BONK trades perform best with quick profit-taking; avoid adding size during broad SOL-led drawdowns.
-- During sharp SOL drawdowns (~-9% to -10% 24h), defensive SOL->USDC rotations are preferable to opening fresh alt positions.
-- When SOL remains below -10% on 24h momentum, keep defensive USDC entries small (0.2 SOL clip) to preserve flexibility for later adds/exits.
-- Quick defensive USDC round-trips during >10% SOL drawdowns can realize small gains; keep using partial-size entries/exits instead of all-in flips.
-- In fast tape, near-full (not exact-full) USDC exits after 0.2 SOL defensive entries continue to lock in small realized gains while avoiding sell-route edge-case failures.
-- For defensive USDC scalps, target ~99.8%-99.9% sell size (leave minimal dust) to balance reliable routing and profit capture.
-- During sustained >11% SOL 24h weakness, short-hold (few-minute) USDC defensive scalps remain effective when entered small (0.2 SOL) and exited on the next relief bounce.
-- After a defensive USDC scalp exits red, avoid immediate re-entry without a fresh SOL momentum bounce confirmation.
-- If SOL 24h momentum only recovers to around -10% after a >11% drawdown, keep USDC defensive positions as short holds and avoid multi-cycle overstays.
-- When SOL rebounds from >11% down toward ~-10% but fails to trend, pause new USDC defensive re-entries because scalp edge degrades in choppy relief.
-- Back-to-back USDC defensive re-entries after the first red scalp in the same weak regime can compound losses; wait for a clearer momentum turn before retrying.
-- When SOL sits near -10% 24h without clear trend expansion, defensive USDC scalp churn has weak edge; prefer no-trade over repeated round-trips.
-- If SOL re-extends to about -11% 24h after a flat/no-position stretch, a single small (0.2 SOL) USDC defensive entry is acceptable, but avoid stacking additional entries before a bounce.
-- After a small defensive USDC entry, if SOL is still around -10.5% 24h and fails to bounce quickly, avoid forcing the exit scalp; churn risk rises and edge turns negative.
-- After a red 0.2 SOL USDC defensive scalp in -10% to -11% SOL momentum, stand down for at least one full cycle before considering another defensive re-entry.
-- If a 0.2 SOL USDC defensive scalp exits red during flat ~-10% SOL momentum, pause new defensive entries until SOL 24h trend clearly improves.
-
-## Perp Entry Rules
-- Start with leverage 2x or below; increase only after consistent wins (max is config limit, currently 3x).
-- Collateral per position should not exceed 20-30% of perp balance.
-- Long only when uptrend is confirmed (rising 24h momentum, higher lows); short only on clear downtrend (falling momentum, lower highs).
-- When holding spot positions simultaneously, consider total portfolio risk (spot + perp exposure combined).
-
-## Perp Exit Rules
-- Engine manages SL/TP/liquidation/timeout automatically — no manual stop orders needed.
-- Use manual perp_close only when trend reversal signals are clear (momentum flip, key level break).
+- JUP/BONK trades perform best with quick profit-taking.
+- For defensive USDC scalps, target ~99.8%-99.9% sell size (leave minimal dust) for reliable routing.
+- After a red scalp exit, wait at least one cycle before re-entering the same trade.
+- Back-to-back re-entries after a loss compound risk; take a breather.
 
 ## Perp Lessons Learned
+
+## Perp Entry Rules
+- If BONK underperforms SOL by >=2 percentage points on 24h change and BONK liquidity stays above $2M, prefer a small 2x BONK short perp over new spot alt longs.

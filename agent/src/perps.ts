@@ -278,7 +278,7 @@ function buildIncreasePositionIx(params: {
   priceSlippage: BN;
   counter: BN;
 }): TransactionInstruction {
-  const sideValue = params.side === "long" ? { long: {} } : { short: {} };
+  const sideValue = params.side === "long" ? { Long: {} } : { Short: {} };
 
   const data = encodeInstruction("createIncreasePositionMarketRequest", {
     params: {

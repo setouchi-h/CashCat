@@ -155,9 +155,8 @@ export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
 
     const isStopLoss = pnlPct <= config.stopLossPct;
     const isTimeout = holdMinutes >= config.maxHoldMinutes;
-    const isTakeProfit = pnlPct >= config.takeProfitPct;
 
-    if (!isStopLoss && !isTimeout && !isTakeProfit) continue;
+    if (!isStopLoss && !isTimeout) continue;
 
     const sellRaw = calcSellRaw(rawAmount);
     if (sellRaw <= 0n) continue;
@@ -173,9 +172,7 @@ export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
 
     const reason = isStopLoss
       ? `stop-loss pnl=${(pnlPct * 100).toFixed(2)}%`
-      : isTakeProfit
-        ? `take-profit pnl=${(pnlPct * 100).toFixed(2)}%`
-        : `timeout hold=${holdMinutes.toFixed(0)}min`;
+      : `timeout hold=${holdMinutes.toFixed(0)}min`;
 
     log.info(`[StopLoss] ${position.symbol}: ${reason}`);
 
@@ -254,18 +251,15 @@ export async function checkPerpStopLoss(state: State): Promise<TradeIntent[]> {
     const remainingCollateral = pos.collateralUsd + netPnl;
     const isLiquidation = remainingCollateral < pos.sizeUsd * config.perps.liquidationThreshold;
     const isStopLoss = pnlPct <= config.perps.stopLossPct;
-    const isTakeProfit = pnlPct >= config.perps.takeProfitPct;
     const isTimeout = holdMinutes >= config.perps.maxHoldMinutes;
 
-    if (!isLiquidation && !isStopLoss && !isTakeProfit && !isTimeout) continue;
+    if (!isLiquidation && !isStopLoss && !isTimeout) continue;
 
     const reason = isLiquidation
       ? `liquidation collateral=$${remainingCollateral.toFixed(2)}`
       : isStopLoss
         ? `stop-loss pnl=${(pnlPct * 100).toFixed(2)}%`
-        : isTakeProfit
-          ? `take-profit pnl=${(pnlPct * 100).toFixed(2)}%`
-          : `timeout hold=${holdMinutes.toFixed(0)}min`;
+        : `timeout hold=${holdMinutes.toFixed(0)}min`;
 
     log.info(`[PerpStopLoss] ${market} ${pos.side}: ${reason}`);
 
