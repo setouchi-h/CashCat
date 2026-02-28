@@ -232,21 +232,21 @@ export function applySell(
   state: State,
   intent: TradeIntent,
   result: TradeResult
-): void {
+): string | undefined {
   if (!result.success) {
     state.failedCount++;
-    return;
+    return undefined;
   }
   state.filledCount++;
 
   const requestedRaw = toBigint(result.inputAmount);
   const outLamports = toBigint(result.outputAmount);
-  if (requestedRaw <= 0n || outLamports <= 0n) return;
+  if (requestedRaw <= 0n || outLamports <= 0n) return undefined;
 
   const position = state.positions[intent.inputMint];
   if (!position) {
     state.cashLamports = (toBigint(state.cashLamports) + outLamports).toString();
-    return;
+    return undefined;
   }
 
   const rawAmount = toBigint(position.rawAmount);
@@ -254,7 +254,7 @@ export function applySell(
   if (rawAmount <= 0n) {
     delete state.positions[intent.inputMint];
     state.cashLamports = (toBigint(state.cashLamports) + outLamports).toString();
-    return;
+    return undefined;
   }
 
   const soldRaw = minBigint(rawAmount, requestedRaw);
@@ -280,18 +280,19 @@ export function applySell(
   state.realizedPnlLamports = (
     toBigint(state.realizedPnlLamports) + pnlLamports
   ).toString();
+  return pnlLamports.toString();
 }
 
 export function applyResult(
   state: State,
   intent: TradeIntent,
   result: TradeResult
-): void {
+): string | undefined {
   if (intent.action === "buy") {
     applyBuy(state, intent, result);
-  } else {
-    applySell(state, intent, result);
+    return undefined;
   }
+  return applySell(state, intent, result);
 }
 
 export function getSummary(state: State): string {

@@ -46,5 +46,6 @@ export const config = {
   initialCashSol: Math.max(0.1, parseNumber(process.env.RUNTIME_AGENTIC_INITIAL_CASH_SOL, 10)),
   statePath: parseOptional(process.env.RUNTIME_AGENTIC_STATE_PATH) ?? "/tmp/cashcat-runtime/agentic-state/state.json",
   codexTimeoutSeconds: Math.max(30, Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_CODEX_TIMEOUT_SECONDS, 120))),
+  ledgerReadPath: parseOptional(process.env.WALLET_MCP_LEDGER_PATH) ?? "data/ledger.jsonl",
   dashboardPort: Number(process.env.DASHBOARD_PORT) || 8787,
 } as const;

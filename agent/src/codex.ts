@@ -155,7 +155,10 @@ async function fetchPricesUsd(mints: string[]): Promise<Record<string, number>> 
     const url = new URL(`${config.jupiter.baseUrl}/price/v3`);
     url.searchParams.set("ids", mints.join(","));
     const res = await fetch(url.toString());
-    if (!res.ok) return {};
+    if (!res.ok) {
+      log.warn(`[Price] HTTP ${res.status}`);
+      return {};
+    }
     const payload = (await res.json()) as Record<string, unknown>;
     const data = (payload?.data ?? payload) as Record<string, unknown>;
     const prices: Record<string, number> = {};
@@ -165,7 +168,8 @@ async function fetchPricesUsd(mints: string[]): Promise<Record<string, number>> 
       prices[mint] = price > 0 ? price : 0;
     }
     return prices;
-  } catch {
+  } catch (e) {
+    log.warn(`[Price] ${e instanceof Error ? e.message : String(e)}`);
     return {};
   }
 }
@@ -293,6 +297,29 @@ Realized PnL: ${realizedSol.toFixed(4)} SOL
 Open positions (${Object.keys(state.positions).length}):
 ${positionLines.length > 0 ? positionLines.join("\n") : "  (none)"}
 
+== Strategy ==
+Read strategy.md for your current trading strategy.
+Update strategy.md ONLY when you learn something new (e.g. after a trade fills, or you discover a pattern).
+Do NOT write per-cycle market observations into strategy.md — it is for durable rules and lessons only.
+Keep strategy.md concise (under 50 lines).
+
+== Observations ==
+Read observations.md for recent market observations.
+Each cycle, append your market observations (prices, momentum, rationale) as a new entry under "## Recent".
+Format each entry as: "### Cycle {N} — {timestamp}" followed by bullet points.
+
+Compaction rules for observations.md:
+- Keep at most 30 entries under "## Recent".
+- When Recent exceeds 30 entries, take the oldest 10, write a 2-3 line summary, and append it to "## Summary" at the top.
+- Then delete those 10 detailed entries from Recent.
+- Keep "## Summary" under 20 lines. If it exceeds 20 lines, trim the oldest summary lines.
+
+== Trade History ==
+Read ${config.ledgerReadPath} for the full trade ledger (JSONL format).
+Filter for type "swap_filled" and "swap_failed" entries to see past trade results.
+Each entry has: timestamp, type, payload (with intentId, txHash, inputMint, outputMint, inputAmount, outputAmount).
+Analyze wins/losses and incorporate lessons into your strategy file.
+
 == Trading ==
 You may trade ANY Solana SPL token. Use Jupiter Price API to research prices and discover tokens.
 You MUST include the mint address and decimals for every token in your intents.
@@ -301,7 +328,7 @@ SOL mint: ${SOL_MINT}
 
 == Price API ==
 Jupiter Price API: curl "${config.jupiter.baseUrl}/price/v3?ids=<mint1>,<mint2>"
-Returns JSON: { data: { "<mint>": { usdPrice: number } } }
+Returns JSON: { "<mint>": { "usdPrice": number, "priceChange24h": number, "liquidity": number } }
 
 == Hard Constraints ==
 - Max intents per cycle: ${config.maxIntentsPerCycle}
@@ -356,7 +383,7 @@ async function runCodexExec(
   try {
     await execFileAsync(
       "codex",
-      ["exec", "--skip-git-repo-check", "-o", outputPath, prompt],
+      ["exec", "--full-auto", "-c", "sandbox_workspace_write.network_access=true", "--skip-git-repo-check", "-o", outputPath, prompt],
       {
         cwd: process.cwd(),
         env: { ...process.env, CODEX_HOME: codexHome },

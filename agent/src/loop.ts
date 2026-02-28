@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { config } from "./config.js";
 import { createLogger } from "./logger.js";
 import { loadState, saveState, applyResult, getSummary } from "./state.js";
@@ -149,6 +150,12 @@ export async function runLoop(signal: AbortSignal): Promise<void> {
   log.info(
     `State loaded: cycle=${state.cycle}, ${getSummary(state)}`
   );
+
+  // Ensure Codex-accessible files exist so it can always read them
+  const observationsPath = path.resolve("observations.md");
+  try { await fs.access(observationsPath); } catch {
+    await fs.writeFile(observationsPath, "# Market Observations\n\n## Summary\n\n(No compacted summaries yet)\n\n## Recent\n\n(No observations yet)\n");
+  }
 
   startDashboard();
 
