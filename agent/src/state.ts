@@ -18,6 +18,7 @@ export interface Position {
 
 export interface PerpPosition {
   market: string;
+  underlyingMint: string;
   side: "long" | "short";
   leverage: number;
   sizeUsd: number;
@@ -134,6 +135,7 @@ export function buildInitialState(realCashLamports?: string): State {
 function sanitizePerpPosition(pos: PerpPosition): PerpPosition {
   return {
     market: pos.market || "",
+    underlyingMint: pos.underlyingMint || "",
     side: pos.side === "short" ? "short" : "long",
     leverage: Number.isFinite(pos.leverage) && pos.leverage > 0 ? pos.leverage : 1,
     sizeUsd: Number.isFinite(pos.sizeUsd) && pos.sizeUsd >= 0 ? pos.sizeUsd : 0,
@@ -333,6 +335,7 @@ export function applySell(
 export function applyPerpOpen(
   state: State,
   market: string,
+  underlyingMint: string,
   side: "long" | "short",
   leverage: number,
   collateralUsd: number,
@@ -351,6 +354,7 @@ export function applyPerpOpen(
   const now = new Date().toISOString();
   state.perpPositions[market] = {
     market,
+    underlyingMint,
     side,
     leverage,
     sizeUsd,

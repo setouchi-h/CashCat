@@ -7,11 +7,6 @@ const log = createLogger("safety");
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
-export const PERP_MARKETS: Record<string, string> = {
-  "SOL-PERP": "So11111111111111111111111111111111111111112",
-  "ETH-PERP": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
-  "BTC-PERP": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
-};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -214,9 +209,11 @@ export async function checkPerpStopLoss(state: State): Promise<TradeIntent[]> {
   const markets = Object.keys(state.perpPositions);
   if (markets.length === 0) return [];
 
-  const underlyingMints = markets
-    .map((m) => PERP_MARKETS[m])
-    .filter(Boolean);
+  const mintMap: Record<string, string> = {};
+  for (const [market, pos] of Object.entries(state.perpPositions)) {
+    if (pos.underlyingMint) mintMap[market] = pos.underlyingMint;
+  }
+  const underlyingMints = [...new Set(Object.values(mintMap))];
   if (underlyingMints.length === 0) return [];
 
   let prices: Record<string, number>;
@@ -231,7 +228,7 @@ export async function checkPerpStopLoss(state: State): Promise<TradeIntent[]> {
   const intents: TradeIntent[] = [];
 
   for (const [market, pos] of Object.entries(state.perpPositions)) {
-    const underlyingMint = PERP_MARKETS[market];
+    const underlyingMint = pos.underlyingMint;
     if (!underlyingMint) continue;
 
     const markPrice = prices[underlyingMint] ?? 0;
@@ -341,8 +338,8 @@ function validatePerpIntent(intent: TradeIntent): string | null {
   const market = typeof intent.metadata?.perpMarket === "string"
     ? intent.metadata.perpMarket as string
     : "";
-  if (!market || !PERP_MARKETS[market]) {
-    return `Invalid perp market: ${market}`;
+  if (!market) {
+    return `Missing perp market name`;
   }
 
   if (intent.action === "perp_open") {

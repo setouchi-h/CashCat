@@ -7,7 +7,7 @@ import type { State, TradeIntent } from "./state.js";
 import { getBalance, executeSwap, signAndSendTransaction } from "./wallet.js";
 import type { TradeOrder } from "./wallet.js";
 import { buildOpenPositionTx, buildClosePositionTx } from "./perps.js";
-import { checkStopLoss, checkPerpStopLoss, validateIntent, PERP_MARKETS } from "./safety.js";
+import { checkStopLoss, checkPerpStopLoss, validateIntent } from "./safety.js";
 import { invokeCodex } from "./codex.js";
 import { startDashboard } from "./ui.js";
 
@@ -118,7 +118,7 @@ async function executePerpOpen(state: State, intent: TradeIntent): Promise<void>
   const side = intent.metadata.perpSide as "long" | "short";
   const leverage = intent.metadata.leverage as number;
   const collateralUsd = intent.metadata.collateralUsd as number;
-  const underlyingMint = PERP_MARKETS[market];
+  const underlyingMint = intent.inputMint;
 
   const entryPrice = await fetchPriceUsd(underlyingMint);
   if (entryPrice <= 0) {
@@ -158,7 +158,7 @@ async function executePerpOpen(state: State, intent: TradeIntent): Promise<void>
     }
   }
 
-  applyPerpOpen(state, market, side, leverage, collateralUsd, entryPrice);
+  applyPerpOpen(state, market, underlyingMint, side, leverage, collateralUsd, entryPrice);
   state.filledCount++;
 
   log.info(
@@ -190,8 +190,7 @@ async function executePerpClose(state: State, intent: TradeIntent): Promise<void
     return;
   }
 
-  const underlyingMint = PERP_MARKETS[market];
-  const closePrice = await fetchPriceUsd(underlyingMint);
+  const closePrice = await fetchPriceUsd(pos.underlyingMint);
   if (closePrice <= 0) {
     log.warn(`[PerpFailed] ${market}: could not fetch close price`);
     state.failedCount++;

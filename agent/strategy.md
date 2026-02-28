@@ -1,7 +1,7 @@
 # CashCat Trading Strategy
 
 (Codex reads and writes this file to evolve its trading strategy)
-(RULES: Only write durable rules and lessons here. Per-cycle market data goes in observations.md. Keep under 50 lines.)
+(RULES: Only write durable rules and lessons here. Per-cycle market data goes in observations.md.)
 
 ## Entry Rules
 - Trade only tokens with Jupiter liquidity >= $2M.
@@ -44,3 +44,15 @@
 - After a small defensive USDC entry, if SOL is still around -10.5% 24h and fails to bounce quickly, avoid forcing the exit scalp; churn risk rises and edge turns negative.
 - After a red 0.2 SOL USDC defensive scalp in -10% to -11% SOL momentum, stand down for at least one full cycle before considering another defensive re-entry.
 - If a 0.2 SOL USDC defensive scalp exits red during flat ~-10% SOL momentum, pause new defensive entries until SOL 24h trend clearly improves.
+
+## Perp Entry Rules
+- Start with leverage 2x or below; increase only after consistent wins (max is config limit, currently 3x).
+- Collateral per position should not exceed 20-30% of perp balance.
+- Long only when uptrend is confirmed (rising 24h momentum, higher lows); short only on clear downtrend (falling momentum, lower highs).
+- When holding spot positions simultaneously, consider total portfolio risk (spot + perp exposure combined).
+
+## Perp Exit Rules
+- Engine manages SL/TP/liquidation/timeout automatically — no manual stop orders needed.
+- Use manual perp_close only when trend reversal signals are clear (momentum flip, key level break).
+
+## Perp Lessons Learned

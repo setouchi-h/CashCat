@@ -8,7 +8,6 @@ import { config } from "./config.js";
 import { createLogger } from "./logger.js";
 import { loginWithOAuth } from "./auth.js";
 import type { State, TradeIntent, PerpPosition } from "./state.js";
-import { PERP_MARKETS } from "./safety.js";
 
 const log = createLogger("codex");
 const execFileAsync = promisify(execFile);
@@ -285,13 +284,13 @@ async function prepareCodexHome(): Promise<string> {
 function buildPerpPromptSection(state: State): string {
   if (!config.perps.enabled) return "";
 
-  const markets = Object.keys(PERP_MARKETS).join(", ");
+  const openMarkets = Object.keys(state.perpPositions).join(", ") || "(none)";
   const perpPositionLines = Object.values(state.perpPositions).map((p: PerpPosition) => {
     return `  ${p.market} ${p.side} ${p.leverage}x: size=$${p.sizeUsd.toFixed(2)}, collateral=$${p.collateralUsd.toFixed(2)}, entry=$${p.entryPriceUsd.toFixed(4)}, liq=$${p.liquidationPriceUsd.toFixed(4)}, borrowFee=$${p.borrowFeeUsd.toFixed(4)}, opened=${p.openedAt}`;
   });
 
   return `== Perpetual Futures (Paper Trading) ==
-Available markets: ${markets}
+You can trade any token as a perp market. Use format "TOKEN-PERP" for perpMarket and provide the underlying token's mint address.
 Max leverage: ${config.perps.maxLeverage}x
 Max open perps: ${config.perps.maxOpenPerps}
 Max collateral per position: ${(config.perps.maxCollateralPct * 100).toFixed(0)}% of perp balance
@@ -334,8 +333,9 @@ Update strategy.md when you learn something durable:
 - When you start monitoring a new token — add it to "## Token Watchlist" with mint and decimals.
 - When a scan candidate consistently returns no data — note it so you deprioritize it.
 - When you discover a new entry/exit pattern — add it to the appropriate rules section.
+- After a perp trade closes (win or loss) — add the lesson to "## Perp Lessons Learned".
+- When you discover a new perp entry/exit pattern — add it to "## Perp Entry Rules" or "## Perp Exit Rules".
 Do NOT write per-cycle market observations into strategy.md — it is for durable rules and lessons only.
-Keep strategy.md concise (under 50 lines).
 
 == Observations ==
 Read observations.md for recent market observations.
@@ -396,7 +396,7 @@ Return ONLY valid JSON (no markdown, no explanation) with keys:
 }
 
 For buys: amountLamports is SOL amount to spend. For sells: amountLamports is raw token amount to sell.${config.perps.enabled ? `
-For perp_open: perpMarket, perpSide, leverage, collateralUsd are required. mint/amountLamports/slippageBps are ignored.
+For perp_open: perpMarket, perpSide, leverage, collateralUsd, and mint (underlying token mint) are required. amountLamports/slippageBps are ignored.
 For perp_close: only perpMarket is required.` : ""}
 If no action is warranted, return { "notes": ["reason"], "intents": [] }.`;
 }
@@ -511,8 +511,8 @@ function normalizePerpDecision(
   const market = typeof decision.perpMarket === "string"
     ? decision.perpMarket.trim().toUpperCase()
     : "";
-  if (!market || !PERP_MARKETS[market]) {
-    notes.push(`[Codex] SKIP ${action}: invalid market "${market}"`);
+  if (!market) {
+    notes.push(`[Codex] SKIP ${action}: missing market name`);
     return null;
   }
 
@@ -524,7 +524,8 @@ function normalizePerpDecision(
   const confidence = clamp(toNumber(decision.confidence), 0, 1);
 
   if (action === "perp_close") {
-    if (!state.perpPositions[market]) {
+    const pos = state.perpPositions[market];
+    if (!pos) {
       notes.push(`[Codex] SKIP perp_close ${market}: no open position`);
       return null;
     }
@@ -535,7 +536,7 @@ function normalizePerpDecision(
     return {
       id: `agentic-${Date.now()}-${market.toLowerCase()}-perp_close-${randomUUID().slice(0, 6)}`,
       action: "perp_close",
-      inputMint: PERP_MARKETS[market],
+      inputMint: pos.underlyingMint,
       outputMint: "",
       amountLamports: 0,
       slippageBps: 0,
@@ -548,7 +549,13 @@ function normalizePerpDecision(
     };
   }
 
-  // perp_open
+  // perp_open — AI must provide underlying token mint
+  const mint = typeof decision.mint === "string" ? decision.mint.trim() : "";
+  if (!mint || !isValidMint(mint)) {
+    notes.push(`[Codex] SKIP perp_open ${market}: missing or invalid underlying mint`);
+    return null;
+  }
+
   if (state.perpPositions[market]) {
     notes.push(`[Codex] SKIP perp_open ${market}: position already open`);
     return null;
@@ -601,7 +608,7 @@ function normalizePerpDecision(
   return {
     id: `agentic-${Date.now()}-${market.toLowerCase()}-perp_open-${randomUUID().slice(0, 6)}`,
     action: "perp_open",
-    inputMint: PERP_MARKETS[market],
+    inputMint: mint,
     outputMint: "",
     amountLamports: 0,
     slippageBps: 0,
