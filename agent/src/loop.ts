@@ -2,11 +2,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
 import { createLogger } from "./logger.js";
-import { loadState, saveState, applyResult, getSummary } from "./state.js";
+import { loadState, saveState, applyResult, applyPerpOpen, applyPerpClose, getSummary } from "./state.js";
 import type { State, TradeIntent } from "./state.js";
-import { getBalance, executeSwap } from "./wallet.js";
+import { getBalance, executeSwap, signAndSendTransaction } from "./wallet.js";
 import type { TradeOrder } from "./wallet.js";
-import { checkStopLoss, validateIntent } from "./safety.js";
+import { buildOpenPositionTx, buildClosePositionTx } from "./perps.js";
+import { checkStopLoss, checkPerpStopLoss, validateIntent, PERP_MARKETS } from "./safety.js";
 import { invokeCodex } from "./codex.js";
 import { startDashboard } from "./ui.js";
 
@@ -14,6 +15,32 @@ const log = createLogger("loop");
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function appendLedgerEvent(
+  type: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const ledgerPath = config.ledgerReadPath;
+  const event = { timestamp: new Date().toISOString(), type, payload };
+  await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
+  await fs.appendFile(ledgerPath, JSON.stringify(event) + "\n", "utf8");
+}
+
+async function fetchPriceUsd(mint: string): Promise<number> {
+  try {
+    const url = new URL(`${config.jupiter.baseUrl}/price/v3`);
+    url.searchParams.set("ids", mint);
+    const res = await fetch(url.toString());
+    if (!res.ok) return 0;
+    const payload = (await res.json()) as Record<string, unknown>;
+    const data = (payload?.data ?? payload) as Record<string, unknown>;
+    const row = data[mint] as Record<string, unknown> | undefined;
+    const price = Number(row?.usdPrice ?? row?.price ?? row?.priceUsd ?? row?.value ?? 0);
+    return Number.isFinite(price) && price > 0 ? price : 0;
+  } catch {
+    return 0;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -54,8 +81,18 @@ async function executeIntent(
     return;
   }
 
+  // Perp intents are handled entirely in-agent (no wallet-mcp)
+  if (intent.action === "perp_open") {
+    await executePerpOpen(state, intent);
+    return;
+  }
+  if (intent.action === "perp_close") {
+    await executePerpClose(state, intent);
+    return;
+  }
+
   const order: TradeOrder = {
-    action: intent.action,
+    action: intent.action as "buy" | "sell",
     inputMint: intent.inputMint,
     outputMint: intent.outputMint,
     amountLamports: intent.amountLamports,
@@ -73,6 +110,147 @@ async function executeIntent(
     log.warn(
       `[Failed] ${intent.action.toUpperCase()} ${intent.metadata?.tokenSymbol ?? intent.outputMint.slice(0, 6)}: ${result.error}`
     );
+  }
+}
+
+async function executePerpOpen(state: State, intent: TradeIntent): Promise<void> {
+  const market = intent.metadata.perpMarket as string;
+  const side = intent.metadata.perpSide as "long" | "short";
+  const leverage = intent.metadata.leverage as number;
+  const collateralUsd = intent.metadata.collateralUsd as number;
+  const underlyingMint = PERP_MARKETS[market];
+
+  const entryPrice = await fetchPriceUsd(underlyingMint);
+  if (entryPrice <= 0) {
+    log.warn(`[PerpFailed] ${market}: could not fetch entry price`);
+    state.failedCount++;
+    return;
+  }
+
+  // Real on-chain perp: build tx → sign & send via wallet-mcp
+  if (!config.perps.paperOnly && config.solanaWalletAddress) {
+    try {
+      const { PublicKey } = await import("@solana/web3.js");
+      const walletPubkey = new PublicKey(config.solanaWalletAddress);
+      const txBase64 = await buildOpenPositionTx(
+        walletPubkey,
+        market,
+        side,
+        leverage,
+        collateralUsd,
+        entryPrice
+      );
+      const result = await signAndSendTransaction(
+        intent.id,
+        txBase64,
+        `Open ${market} ${side} ${leverage}x collateral=$${collateralUsd.toFixed(2)}`
+      );
+      if (!result.success) {
+        log.warn(`[PerpFailed] ${market}: tx failed: ${result.error}`);
+        state.failedCount++;
+        return;
+      }
+      log.info(`[PerpTxSent] ${market} ${side} ${leverage}x tx=${result.txHash ?? "n/a"}`);
+    } catch (e) {
+      log.warn(`[PerpFailed] ${market}: tx build/send error: ${e instanceof Error ? e.message : String(e)}`);
+      state.failedCount++;
+      return;
+    }
+  }
+
+  applyPerpOpen(state, market, side, leverage, collateralUsd, entryPrice);
+  state.filledCount++;
+
+  log.info(
+    `[PerpOpened] ${market} ${side} ${leverage}x collateral=$${collateralUsd.toFixed(2)} entry=$${entryPrice.toFixed(4)}`
+  );
+
+  try {
+    await appendLedgerEvent("perp_opened", {
+      intentId: intent.id,
+      market,
+      side,
+      leverage,
+      collateralUsd,
+      entryPriceUsd: entryPrice,
+      sizeUsd: collateralUsd * leverage,
+      reason: intent.metadata.reason,
+      mode: config.perps.paperOnly ? "paper" : "live",
+    });
+  } catch (e) {
+    log.warn(`Ledger write failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function executePerpClose(state: State, intent: TradeIntent): Promise<void> {
+  const market = intent.metadata.perpMarket as string;
+  const pos = state.perpPositions[market];
+  if (!pos) {
+    log.warn(`[PerpFailed] ${market}: no position to close`);
+    return;
+  }
+
+  const underlyingMint = PERP_MARKETS[market];
+  const closePrice = await fetchPriceUsd(underlyingMint);
+  if (closePrice <= 0) {
+    log.warn(`[PerpFailed] ${market}: could not fetch close price`);
+    state.failedCount++;
+    return;
+  }
+
+  // Real on-chain perp: build close tx → sign & send via wallet-mcp
+  if (!config.perps.paperOnly && config.solanaWalletAddress) {
+    try {
+      const { PublicKey } = await import("@solana/web3.js");
+      const walletPubkey = new PublicKey(config.solanaWalletAddress);
+      const txBase64 = await buildClosePositionTx(
+        walletPubkey,
+        market,
+        pos.side,
+        closePrice
+      );
+      const result = await signAndSendTransaction(
+        intent.id,
+        txBase64,
+        `Close ${market} ${pos.side} ${pos.leverage}x`
+      );
+      if (!result.success) {
+        log.warn(`[PerpFailed] ${market}: close tx failed: ${result.error}`);
+        state.failedCount++;
+        return;
+      }
+      log.info(`[PerpCloseTxSent] ${market} ${pos.side} tx=${result.txHash ?? "n/a"}`);
+    } catch (e) {
+      log.warn(`[PerpFailed] ${market}: close tx build/send error: ${e instanceof Error ? e.message : String(e)}`);
+      state.failedCount++;
+      return;
+    }
+  }
+
+  const { pnlUsd } = applyPerpClose(state, market, closePrice);
+  state.filledCount++;
+
+  const pnlSign = pnlUsd >= 0 ? "+" : "";
+  log.info(
+    `[PerpClosed] ${market} ${pos.side} ${pos.leverage}x close=$${closePrice.toFixed(4)} pnl=${pnlSign}$${pnlUsd.toFixed(2)} reason=${intent.metadata.reason ?? "manual"}`
+  );
+
+  try {
+    await appendLedgerEvent("perp_closed", {
+      intentId: intent.id,
+      market,
+      side: pos.side,
+      leverage: pos.leverage,
+      entryPriceUsd: pos.entryPriceUsd,
+      closePriceUsd: closePrice,
+      pnlUsd,
+      collateralUsd: pos.collateralUsd,
+      sizeUsd: pos.sizeUsd,
+      reason: intent.metadata.reason,
+      mode: config.perps.paperOnly ? "paper" : "live",
+    });
+  } catch (e) {
+    log.warn(`Ledger write failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -98,12 +276,26 @@ async function runStopLossLoop(
 
     if (signal.aborted) break;
 
-    // Skip if no positions — avoids unnecessary Jupiter API calls
-    if (Object.keys(state.positions).length === 0) continue;
+    const hasSpotPositions = Object.keys(state.positions).length > 0;
+    const hasPerpPositions = Object.keys(state.perpPositions).length > 0;
+
+    // Skip if no positions at all — avoids unnecessary Jupiter API calls
+    if (!hasSpotPositions && !hasPerpPositions) continue;
 
     const release = await mutex.acquire();
     try {
-      const intents = await checkStopLoss(state);
+      const intents: TradeIntent[] = [];
+
+      if (hasSpotPositions) {
+        const spotIntents = await checkStopLoss(state);
+        intents.push(...spotIntents);
+      }
+
+      if (hasPerpPositions) {
+        const perpIntents = await checkPerpStopLoss(state);
+        intents.push(...perpIntents);
+      }
+
       for (const intent of intents) {
         if (signal.aborted) break;
         await executeIntent(state, intent);

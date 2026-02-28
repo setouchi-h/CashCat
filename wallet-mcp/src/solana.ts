@@ -347,6 +347,102 @@ export async function executeSwap(params: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// signAndSendTransaction — generic sign, send, confirm for pre-built txns
+// ---------------------------------------------------------------------------
+
+export interface SignAndSendResult {
+  intentId: string;
+  status: "sent" | "failed";
+  chain: "solana";
+  txHash?: string;
+  description: string;
+  error?: string;
+  createdAt: string;
+}
+
+export async function signAndSendTransaction(params: {
+  intentId: string;
+  transaction: string; // base64-encoded VersionedTransaction
+  description: string;
+}): Promise<SignAndSendResult> {
+  const createdAt = new Date().toISOString();
+  const { intentId, transaction: txBase64, description } = params;
+
+  try {
+    if (config.paperTrade) {
+      const paperResult: SignAndSendResult = {
+        intentId,
+        status: "sent",
+        chain: "solana",
+        txHash: `paper_perp_${Date.now()}`,
+        description,
+        createdAt,
+      };
+
+      await appendLedgerEvent("tx_signed_and_sent", {
+        intentId,
+        txHash: paperResult.txHash,
+        mode: "paper",
+        description,
+      });
+
+      return paperResult;
+    }
+
+    const wallet = getKeypair();
+    const txBuffer = Buffer.from(txBase64, "base64");
+    const transaction = VersionedTransaction.deserialize(txBuffer);
+    transaction.sign([wallet]);
+
+    const conn = getConnection();
+    const txHash = await conn.sendRawTransaction(transaction.serialize(), {
+      skipPreflight: false,
+      maxRetries: 2,
+    });
+
+    const latestBlockhash = await conn.getLatestBlockhash();
+    await conn.confirmTransaction({
+      signature: txHash,
+      blockhash: latestBlockhash.blockhash,
+      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    });
+
+    await appendLedgerEvent("tx_signed_and_sent", {
+      intentId,
+      txHash,
+      mode: "live",
+      description,
+    });
+
+    return {
+      intentId,
+      status: "sent",
+      chain: "solana",
+      txHash,
+      description,
+      createdAt,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    await appendLedgerEvent("tx_sign_and_send_failed", {
+      intentId,
+      error: message,
+      description,
+    });
+
+    return {
+      intentId,
+      status: "failed",
+      chain: "solana",
+      description,
+      error: message,
+      createdAt,
+    };
+  }
+}
+
 export async function getTransactionStatus(txHash: string): Promise<{
   chain: "solana";
   txHash: string;

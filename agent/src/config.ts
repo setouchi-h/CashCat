@@ -46,6 +46,22 @@ export const config = {
   initialCashSol: Math.max(0.1, parseNumber(process.env.RUNTIME_AGENTIC_INITIAL_CASH_SOL, 10)),
   statePath: parseOptional(process.env.RUNTIME_AGENTIC_STATE_PATH) ?? "/tmp/cashcat-runtime/agentic-state/state.json",
   codexTimeoutSeconds: Math.max(30, Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_CODEX_TIMEOUT_SECONDS, 120))),
-  ledgerReadPath: parseOptional(process.env.WALLET_MCP_LEDGER_PATH) ?? "data/ledger.jsonl",
+  ledgerReadPath: parseOptional(process.env.WALLET_MCP_LEDGER_PATH) ?? "/tmp/cashcat-runtime/wallet-mcp/ledger.jsonl",
   dashboardPort: Number(process.env.DASHBOARD_PORT) || 8787,
+  solanaWalletAddress: parseOptional(process.env.SOLANA_WALLET_ADDRESS) ?? "",
+  solanaRpcUrl: parseOptional(process.env.SOLANA_RPC_URL) ?? "https://api.mainnet-beta.solana.com",
+  perps: {
+    enabled: process.env.RUNTIME_PERPS_ENABLED === "true",
+    initialBalanceUsd: parseNumber(process.env.RUNTIME_PERPS_INITIAL_BALANCE_USD, 500),
+    maxLeverage: 3,
+    maxOpenPerps: 3,
+    stopLossPct: -0.15,
+    takeProfitPct: 0.20,
+    maxHoldMinutes: 240,
+    maxCollateralPct: 0.30,
+    openCloseFeeRate: 0.0007,
+    hourlyBorrowRate: 0.00001,
+    liquidationThreshold: 0.002,
+    paperOnly: process.env.RUNTIME_PERPS_PAPER_ONLY !== "false", // default paper
+  },
 } as const;

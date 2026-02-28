@@ -7,7 +7,8 @@ import { promisify } from "node:util";
 import { config } from "./config.js";
 import { createLogger } from "./logger.js";
 import { loginWithOAuth } from "./auth.js";
-import type { State, TradeIntent } from "./state.js";
+import type { State, TradeIntent, PerpPosition } from "./state.js";
+import { PERP_MARKETS } from "./safety.js";
 
 const log = createLogger("codex");
 const execFileAsync = promisify(execFile);
@@ -27,6 +28,10 @@ interface CodexDecision {
   slippageBps?: unknown;
   reason?: unknown;
   confidence?: unknown;
+  perpMarket?: unknown;
+  perpSide?: unknown;
+  leverage?: unknown;
+  collateralUsd?: unknown;
 }
 
 interface CodexOutput {
@@ -277,6 +282,31 @@ async function prepareCodexHome(): Promise<string> {
 // buildPrompt
 // ---------------------------------------------------------------------------
 
+function buildPerpPromptSection(state: State): string {
+  if (!config.perps.enabled) return "";
+
+  const markets = Object.keys(PERP_MARKETS).join(", ");
+  const perpPositionLines = Object.values(state.perpPositions).map((p: PerpPosition) => {
+    return `  ${p.market} ${p.side} ${p.leverage}x: size=$${p.sizeUsd.toFixed(2)}, collateral=$${p.collateralUsd.toFixed(2)}, entry=$${p.entryPriceUsd.toFixed(4)}, liq=$${p.liquidationPriceUsd.toFixed(4)}, borrowFee=$${p.borrowFeeUsd.toFixed(4)}, opened=${p.openedAt}`;
+  });
+
+  return `== Perpetual Futures (Paper Trading) ==
+Available markets: ${markets}
+Max leverage: ${config.perps.maxLeverage}x
+Max open perps: ${config.perps.maxOpenPerps}
+Max collateral per position: ${(config.perps.maxCollateralPct * 100).toFixed(0)}% of perp balance
+Open/close fee: ${(config.perps.openCloseFeeRate * 100).toFixed(3)}% of notional
+Hourly borrow rate: ${(config.perps.hourlyBorrowRate * 100).toFixed(4)}%
+Stop-loss / take-profit / liquidation / timeout are handled by the engine automatically.
+
+Perp Balance: $${state.perpBalanceUsd.toFixed(2)} USD
+Realized Perp PnL: $${state.realizedPerpPnlUsd.toFixed(2)} USD
+Open perp positions (${Object.keys(state.perpPositions).length}):
+${perpPositionLines.length > 0 ? perpPositionLines.join("\n") : "  (none)"}
+
+`;
+}
+
 export function buildPrompt(state: State, now: Date): string {
   const cashLamports = toBigint(state.cashLamports);
   const cashSol = Number(cashLamports) / 1_000_000_000;
@@ -343,25 +373,31 @@ Returns JSON: { "<mint>": { "usdPrice": number, "priceChange24h": number, "liqui
 - Max slippage: ${config.maxSlippageBps} bps, default slippage: ${config.intentSlippageBps} bps
 - Stop-loss / take-profit / timeout are handled by the engine automatically. Do NOT generate stop-loss sells.
 
-== Output Format ==
+${buildPerpPromptSection(state)}== Output Format ==
 Return ONLY valid JSON (no markdown, no explanation) with keys:
 {
   "notes": ["string array of your reasoning"],
   "intents": [
     {
-      "action": "buy" | "sell",
+      "action": "buy" | "sell"${config.perps.enabled ? ' | "perp_open" | "perp_close"' : ""},
       "symbol": "TOKEN_SYMBOL",
       "mint": "MINT_ADDRESS",
       "decimals": number,
       "amountLamports": number,
       "slippageBps": number,
       "reason": "brief reason",
-      "confidence": 0.0-1.0
+      "confidence": 0.0-1.0${config.perps.enabled ? `,
+      "perpMarket": "SOL-PERP",
+      "perpSide": "long" | "short",
+      "leverage": number,
+      "collateralUsd": number` : ""}
     }
   ]
 }
 
-For buys: amountLamports is SOL amount to spend. For sells: amountLamports is raw token amount to sell.
+For buys: amountLamports is SOL amount to spend. For sells: amountLamports is raw token amount to sell.${config.perps.enabled ? `
+For perp_open: perpMarket, perpSide, leverage, collateralUsd are required. mint/amountLamports/slippageBps are ignored.
+For perp_close: only perpMarket is required.` : ""}
 If no action is warranted, return { "notes": ["reason"], "intents": [] }.`;
 }
 
@@ -459,6 +495,129 @@ export async function invokeCodex(
 }
 
 // ---------------------------------------------------------------------------
+// normalizePerpDecision — validate and normalize a single perp intent from Codex
+// ---------------------------------------------------------------------------
+
+function normalizePerpDecision(
+  decision: CodexDecision,
+  action: string,
+  state: State,
+  nowMs: number,
+  minGapMs: number,
+  notes: string[]
+): TradeIntent | null {
+  if (!config.perps.enabled) return null;
+
+  const market = typeof decision.perpMarket === "string"
+    ? decision.perpMarket.trim().toUpperCase()
+    : "";
+  if (!market || !PERP_MARKETS[market]) {
+    notes.push(`[Codex] SKIP ${action}: invalid market "${market}"`);
+    return null;
+  }
+
+  // cooldown check using market name as key
+  const lastAt = state.lastIntentAt[market] ?? 0;
+  if (nowMs - lastAt < minGapMs) return null;
+
+  const reason = typeof decision.reason === "string" ? decision.reason.trim() : "";
+  const confidence = clamp(toNumber(decision.confidence), 0, 1);
+
+  if (action === "perp_close") {
+    if (!state.perpPositions[market]) {
+      notes.push(`[Codex] SKIP perp_close ${market}: no open position`);
+      return null;
+    }
+
+    state.lastIntentAt[market] = nowMs;
+    notes.push(`[Codex] PERP_CLOSE ${market}${reason ? ` reason=${reason}` : ""}`);
+
+    return {
+      id: `agentic-${Date.now()}-${market.toLowerCase()}-perp_close-${randomUUID().slice(0, 6)}`,
+      action: "perp_close",
+      inputMint: PERP_MARKETS[market],
+      outputMint: "",
+      amountLamports: 0,
+      slippageBps: 0,
+      metadata: {
+        planner: "codex-agent",
+        perpMarket: market,
+        reason,
+        confidence,
+      },
+    };
+  }
+
+  // perp_open
+  if (state.perpPositions[market]) {
+    notes.push(`[Codex] SKIP perp_open ${market}: position already open`);
+    return null;
+  }
+
+  if (Object.keys(state.perpPositions).length >= config.perps.maxOpenPerps) {
+    notes.push(`[Codex] SKIP perp_open: max open perps (${config.perps.maxOpenPerps}) reached`);
+    return null;
+  }
+
+  const side = typeof decision.perpSide === "string"
+    ? decision.perpSide.trim().toLowerCase()
+    : "";
+  if (side !== "long" && side !== "short") {
+    notes.push(`[Codex] SKIP perp_open ${market}: invalid side "${side}"`);
+    return null;
+  }
+
+  const leverage = clamp(
+    Math.floor(toNumber(decision.leverage)),
+    1,
+    config.perps.maxLeverage
+  );
+
+  let collateralUsd = toNumber(decision.collateralUsd);
+  const maxCollateral = state.perpBalanceUsd * config.perps.maxCollateralPct;
+  if (collateralUsd <= 0 || collateralUsd > maxCollateral) {
+    collateralUsd = Math.min(collateralUsd > 0 ? collateralUsd : maxCollateral, maxCollateral);
+  }
+  if (collateralUsd <= 0 || collateralUsd > state.perpBalanceUsd) {
+    notes.push(`[Codex] SKIP perp_open ${market}: insufficient perp balance ($${state.perpBalanceUsd.toFixed(2)})`);
+    return null;
+  }
+
+  // Account for open/close fees in balance check
+  const fee = collateralUsd * leverage * config.perps.openCloseFeeRate;
+  if (collateralUsd + fee > state.perpBalanceUsd) {
+    collateralUsd = (state.perpBalanceUsd - fee * 2) / (1 + leverage * config.perps.openCloseFeeRate);
+    if (collateralUsd <= 0) {
+      notes.push(`[Codex] SKIP perp_open ${market}: insufficient balance for fees`);
+      return null;
+    }
+  }
+
+  state.lastIntentAt[market] = nowMs;
+  notes.push(
+    `[Codex] PERP_OPEN ${market} ${side} ${leverage}x collateral=$${collateralUsd.toFixed(2)}${reason ? ` reason=${reason}` : ""}`
+  );
+
+  return {
+    id: `agentic-${Date.now()}-${market.toLowerCase()}-perp_open-${randomUUID().slice(0, 6)}`,
+    action: "perp_open",
+    inputMint: PERP_MARKETS[market],
+    outputMint: "",
+    amountLamports: 0,
+    slippageBps: 0,
+    metadata: {
+      planner: "codex-agent",
+      perpMarket: market,
+      perpSide: side,
+      leverage,
+      collateralUsd,
+      reason,
+      confidence,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // normalizeCodexOutput — sanitize + clamp codex decisions
 // ---------------------------------------------------------------------------
 
@@ -494,6 +653,14 @@ function normalizeCodexOutput(
       typeof decision.action === "string"
         ? decision.action.trim().toLowerCase()
         : "";
+
+    // Handle perp intents separately
+    if (action === "perp_open" || action === "perp_close") {
+      const perpIntent = normalizePerpDecision(decision, action, state, nowMs, minGapMs, notes);
+      if (perpIntent) intents.push(perpIntent);
+      continue;
+    }
+
     if (action !== "buy" && action !== "sell") continue;
 
     const token = resolveToken(decision);

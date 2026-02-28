@@ -9,6 +9,7 @@ import {
   getStoredQuote,
   getTransactionStatus,
   getWalletAddress,
+  signAndSendTransaction,
 } from "./solana.js";
 
 const log = createLogger("server");
@@ -102,6 +103,22 @@ const tools = [
         txHash: { type: "string" },
       },
       required: ["chain", "txHash"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "wallet_sign_and_send",
+    description:
+      "Sign and send a pre-built transaction (base64-encoded VersionedTransaction).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chain: { type: "string", enum: ["solana"] },
+        intentId: { type: "string" },
+        transaction: { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["chain", "intentId", "transaction", "description"],
       additionalProperties: false,
     },
   },
@@ -323,6 +340,18 @@ async function callTool(request: ToolCallRequest): Promise<{
           amountLamports,
           slippageBps,
         },
+      });
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+    case "wallet_sign_and_send": {
+      ensureSolanaChain(args);
+      const intentId = readRequiredString(args, "intentId");
+      const transaction = readRequiredString(args, "transaction");
+      const description = readRequiredString(args, "description");
+      const result = await signAndSendTransaction({
+        intentId,
+        transaction,
+        description,
       });
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     }

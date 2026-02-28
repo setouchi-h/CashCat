@@ -263,6 +263,163 @@ export async function getBalance(): Promise<WalletBalance> {
 // executeSwap
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// signAndSendTransaction
+// ---------------------------------------------------------------------------
+
+export interface SignAndSendResult {
+  success: boolean;
+  txHash?: string;
+  error?: string;
+}
+
+export async function signAndSendTransaction(
+  intentId: string,
+  transaction: string,
+  description: string
+): Promise<SignAndSendResult> {
+  if (!config.walletMcp.enabled) {
+    return { success: false, error: "wallet-mcp execution is disabled" };
+  }
+
+  const command = config.walletMcp.command.trim();
+  if (!command) {
+    return { success: false, error: "RUNTIME_WALLET_MCP_COMMAND is empty" };
+  }
+
+  const cwd = config.walletMcp.cwd.trim() || process.cwd();
+  const timeoutMs = Math.max(5, config.walletMcp.timeoutSeconds) * 1000;
+
+  return await new Promise<SignAndSendResult>((resolve) => {
+    const child = spawn("zsh", ["-lc", command], {
+      cwd,
+      env: process.env,
+      stdio: "pipe",
+    });
+
+    const initRequestId = 1;
+    const toolCallRequestId = 2;
+    let done = false;
+    let stdoutBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+    let stderr = "";
+
+    const finish = (result: SignAndSendResult): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      child.kill("SIGTERM");
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      const error = `wallet-mcp sign_and_send timed out after ${timeoutMs}ms`;
+      log.warn(error);
+      finish({ success: false, error });
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk: Buffer<ArrayBufferLike>) => {
+      stdoutBuffer = Buffer.concat([stdoutBuffer, chunk]);
+      const parsed = parseFrames(stdoutBuffer);
+      stdoutBuffer = parsed.rest;
+
+      for (const message of parsed.messages) {
+        if (done) return;
+        if (typeof message.id !== "number") continue;
+
+        if (message.id === initRequestId) {
+          if (message.error) {
+            finish({
+              success: false,
+              error: `wallet-mcp initialize failed: ${message.error.message}`,
+            });
+            return;
+          }
+
+          writeFrame(child.stdin, {
+            jsonrpc: "2.0",
+            method: "notifications/initialized",
+          });
+
+          writeFrame(child.stdin, {
+            jsonrpc: "2.0",
+            id: toolCallRequestId,
+            method: "tools/call",
+            params: {
+              name: "wallet_sign_and_send",
+              arguments: {
+                chain: "solana",
+                intentId,
+                transaction,
+                description,
+              },
+            },
+          });
+          continue;
+        }
+
+        if (message.id === toolCallRequestId) {
+          if (message.error) {
+            finish({
+              success: false,
+              error: `wallet_sign_and_send RPC error: ${message.error.message}`,
+            });
+            return;
+          }
+
+          try {
+            const payload = extractResultPayload(message.result);
+            const success = payload.status === "filled" || payload.status === undefined;
+            finish({
+              success: payload.status !== "failed" && !payload.error,
+              txHash: payload.txHash,
+              error: payload.error ?? payload.reason,
+            });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            finish({ success: false, error: msg });
+          }
+          return;
+        }
+      }
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += String(chunk);
+    });
+
+    child.on("error", (e) => {
+      finish({
+        success: false,
+        error: `wallet-mcp spawn failed: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    });
+
+    child.on("close", (code) => {
+      if (done) return;
+      const stderrTail = stderr.trim() ? ` | stderr=${stderr.trim()}` : "";
+      finish({
+        success: false,
+        error: `wallet-mcp exited before response (code=${code})${stderrTail}`,
+      });
+    });
+
+    writeFrame(child.stdin, {
+      jsonrpc: "2.0",
+      id: initRequestId,
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "cashcat-agent", version: "0.1.0" },
+      },
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// executeSwap
+// ---------------------------------------------------------------------------
+
 export async function executeSwap(
   intentId: string,
   order: TradeOrder

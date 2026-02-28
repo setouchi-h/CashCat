@@ -7,6 +7,12 @@ const log = createLogger("safety");
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
+export const PERP_MARKETS: Record<string, string> = {
+  "SOL-PERP": "So11111111111111111111111111111111111111112",
+  "ETH-PERP": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+  "BTC-PERP": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -199,12 +205,105 @@ export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
 }
 
 // ---------------------------------------------------------------------------
+// checkPerpStopLoss — returns perp_close intents for positions that hit SL/TP/liquidation/timeout
+// ---------------------------------------------------------------------------
+
+export async function checkPerpStopLoss(state: State): Promise<TradeIntent[]> {
+  if (!config.perps.enabled) return [];
+
+  const markets = Object.keys(state.perpPositions);
+  if (markets.length === 0) return [];
+
+  const underlyingMints = markets
+    .map((m) => PERP_MARKETS[m])
+    .filter(Boolean);
+  if (underlyingMints.length === 0) return [];
+
+  let prices: Record<string, number>;
+  try {
+    prices = await fetchPricesUsd(underlyingMints);
+  } catch (e) {
+    log.warn(`Perp stop-loss price fetch failed: ${e instanceof Error ? e.message : String(e)}`);
+    return [];
+  }
+
+  const nowMs = Date.now();
+  const intents: TradeIntent[] = [];
+
+  for (const [market, pos] of Object.entries(state.perpPositions)) {
+    const underlyingMint = PERP_MARKETS[market];
+    if (!underlyingMint) continue;
+
+    const markPrice = prices[underlyingMint] ?? 0;
+    if (markPrice <= 0) continue;
+
+    // Accumulate borrow fee
+    const holdHours = Math.max(0, (nowMs - Date.parse(pos.openedAt)) / 3_600_000);
+    pos.borrowFeeUsd = pos.sizeUsd * config.perps.hourlyBorrowRate * holdHours;
+    pos.updatedAt = new Date().toISOString();
+
+    // PnL calculation
+    const priceChange = (markPrice - pos.entryPriceUsd) / pos.entryPriceUsd;
+    const rawPnl =
+      pos.side === "long"
+        ? pos.sizeUsd * priceChange
+        : pos.sizeUsd * -priceChange;
+    const netPnl = rawPnl - pos.borrowFeeUsd;
+    const pnlPct = netPnl / pos.collateralUsd;
+
+    const holdMinutes = holdHours * 60;
+
+    // Check remaining collateral for liquidation
+    const remainingCollateral = pos.collateralUsd + netPnl;
+    const isLiquidation = remainingCollateral < pos.sizeUsd * config.perps.liquidationThreshold;
+    const isStopLoss = pnlPct <= config.perps.stopLossPct;
+    const isTakeProfit = pnlPct >= config.perps.takeProfitPct;
+    const isTimeout = holdMinutes >= config.perps.maxHoldMinutes;
+
+    if (!isLiquidation && !isStopLoss && !isTakeProfit && !isTimeout) continue;
+
+    const reason = isLiquidation
+      ? `liquidation collateral=$${remainingCollateral.toFixed(2)}`
+      : isStopLoss
+        ? `stop-loss pnl=${(pnlPct * 100).toFixed(2)}%`
+        : isTakeProfit
+          ? `take-profit pnl=${(pnlPct * 100).toFixed(2)}%`
+          : `timeout hold=${holdMinutes.toFixed(0)}min`;
+
+    log.info(`[PerpStopLoss] ${market} ${pos.side}: ${reason}`);
+
+    intents.push({
+      id: `agentic-${Date.now()}-${market.toLowerCase()}-perp_close-${randomUUID().slice(0, 6)}`,
+      action: "perp_close",
+      inputMint: underlyingMint,
+      outputMint: "",
+      amountLamports: 0,
+      slippageBps: 0,
+      metadata: {
+        planner: "safety",
+        perpMarket: market,
+        reason,
+        pnlPct,
+        holdMinutes,
+      },
+    });
+  }
+
+  return intents;
+}
+
+// ---------------------------------------------------------------------------
 // validateIntent — returns error reason string or null (valid)
 // ---------------------------------------------------------------------------
 
 export function validateIntent(intent: TradeIntent): string | null {
   if (config.killSwitch) {
     return "Global kill switch is enabled";
+  }
+
+  // Perp intents use separate validation
+  if (intent.action === "perp_open" || intent.action === "perp_close") {
+    return validatePerpIntent(intent);
   }
 
   if (!intent.amountLamports || intent.amountLamports <= 0) {
@@ -229,6 +328,34 @@ export function validateIntent(intent: TradeIntent): string | null {
 
   if (intent.inputMint === intent.outputMint) {
     return "inputMint and outputMint must differ";
+  }
+
+  return null;
+}
+
+function validatePerpIntent(intent: TradeIntent): string | null {
+  if (!config.perps.enabled) {
+    return "Perps are disabled";
+  }
+
+  const market = typeof intent.metadata?.perpMarket === "string"
+    ? intent.metadata.perpMarket as string
+    : "";
+  if (!market || !PERP_MARKETS[market]) {
+    return `Invalid perp market: ${market}`;
+  }
+
+  if (intent.action === "perp_open") {
+    const side = intent.metadata?.perpSide;
+    if (side !== "long" && side !== "short") {
+      return `Invalid perp side: ${side}`;
+    }
+    const leverage = typeof intent.metadata?.leverage === "number"
+      ? intent.metadata.leverage as number
+      : 0;
+    if (leverage < 1 || leverage > config.perps.maxLeverage) {
+      return `Leverage out of range: ${leverage} (max ${config.perps.maxLeverage})`;
+    }
   }
 
   return null;

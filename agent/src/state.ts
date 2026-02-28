@@ -16,6 +16,19 @@ export interface Position {
   updatedAt: string;
 }
 
+export interface PerpPosition {
+  market: string;
+  side: "long" | "short";
+  leverage: number;
+  sizeUsd: number;
+  collateralUsd: number;
+  entryPriceUsd: number;
+  liquidationPriceUsd: number;
+  borrowFeeUsd: number;
+  openedAt: string;
+  updatedAt: string;
+}
+
 export interface State {
   cycle: number;
   cashLamports: string;
@@ -26,11 +39,15 @@ export interface State {
   filledCount: number;
   failedCount: number;
   updatedAt: string;
+  // Perp paper trading (independent from wallet)
+  perpPositions: Record<string, PerpPosition>;
+  perpBalanceUsd: number;
+  realizedPerpPnlUsd: number;
 }
 
 export interface TradeIntent {
   id: string;
-  action: "buy" | "sell";
+  action: "buy" | "sell" | "perp_open" | "perp_close";
   inputMint: string;
   outputMint: string;
   amountLamports: number;
@@ -108,6 +125,24 @@ export function buildInitialState(realCashLamports?: string): State {
     filledCount: 0,
     failedCount: 0,
     updatedAt: new Date().toISOString(),
+    perpPositions: {},
+    perpBalanceUsd: config.perps.initialBalanceUsd,
+    realizedPerpPnlUsd: 0,
+  };
+}
+
+function sanitizePerpPosition(pos: PerpPosition): PerpPosition {
+  return {
+    market: pos.market || "",
+    side: pos.side === "short" ? "short" : "long",
+    leverage: Number.isFinite(pos.leverage) && pos.leverage > 0 ? pos.leverage : 1,
+    sizeUsd: Number.isFinite(pos.sizeUsd) && pos.sizeUsd >= 0 ? pos.sizeUsd : 0,
+    collateralUsd: Number.isFinite(pos.collateralUsd) && pos.collateralUsd >= 0 ? pos.collateralUsd : 0,
+    entryPriceUsd: Number.isFinite(pos.entryPriceUsd) && pos.entryPriceUsd > 0 ? pos.entryPriceUsd : 0,
+    liquidationPriceUsd: Number.isFinite(pos.liquidationPriceUsd) && pos.liquidationPriceUsd >= 0 ? pos.liquidationPriceUsd : 0,
+    borrowFeeUsd: Number.isFinite(pos.borrowFeeUsd) && pos.borrowFeeUsd >= 0 ? pos.borrowFeeUsd : 0,
+    openedAt: pos.openedAt || new Date().toISOString(),
+    updatedAt: pos.updatedAt || new Date().toISOString(),
   };
 }
 
@@ -115,6 +150,11 @@ function sanitizeState(state: State): State {
   const positions: Record<string, Position> = {};
   for (const [mint, pos] of Object.entries(state.positions ?? {})) {
     positions[mint] = sanitizePosition(pos as Position);
+  }
+
+  const perpPositions: Record<string, PerpPosition> = {};
+  for (const [market, pos] of Object.entries(state.perpPositions ?? {})) {
+    perpPositions[market] = sanitizePerpPosition(pos as PerpPosition);
   }
 
   return {
@@ -135,6 +175,9 @@ function sanitizeState(state: State): State {
         ? Math.floor(state.failedCount)
         : 0,
     updatedAt: state.updatedAt || new Date().toISOString(),
+    perpPositions,
+    perpBalanceUsd: Number.isFinite(state.perpBalanceUsd) ? state.perpBalanceUsd : config.perps.initialBalanceUsd,
+    realizedPerpPnlUsd: Number.isFinite(state.realizedPerpPnlUsd) ? state.realizedPerpPnlUsd : 0,
   };
 }
 
@@ -283,6 +326,67 @@ export function applySell(
   return pnlLamports.toString();
 }
 
+// ---------------------------------------------------------------------------
+// State mutations: applyPerpOpen / applyPerpClose
+// ---------------------------------------------------------------------------
+
+export function applyPerpOpen(
+  state: State,
+  market: string,
+  side: "long" | "short",
+  leverage: number,
+  collateralUsd: number,
+  entryPriceUsd: number
+): void {
+  const fee = collateralUsd * leverage * config.perps.openCloseFeeRate;
+  state.perpBalanceUsd -= collateralUsd + fee;
+
+  const sizeUsd = collateralUsd * leverage;
+  const liqDistance = collateralUsd / sizeUsd;
+  const liquidationPriceUsd =
+    side === "long"
+      ? entryPriceUsd * (1 - liqDistance)
+      : entryPriceUsd * (1 + liqDistance);
+
+  const now = new Date().toISOString();
+  state.perpPositions[market] = {
+    market,
+    side,
+    leverage,
+    sizeUsd,
+    collateralUsd,
+    entryPriceUsd,
+    liquidationPriceUsd,
+    borrowFeeUsd: 0,
+    openedAt: now,
+    updatedAt: now,
+  };
+}
+
+export function applyPerpClose(
+  state: State,
+  market: string,
+  closePriceUsd: number
+): { pnlUsd: number; reason?: string } {
+  const pos = state.perpPositions[market];
+  if (!pos) return { pnlUsd: 0, reason: "no position" };
+
+  const priceChange = (closePriceUsd - pos.entryPriceUsd) / pos.entryPriceUsd;
+  const rawPnl =
+    pos.side === "long"
+      ? pos.sizeUsd * priceChange
+      : pos.sizeUsd * -priceChange;
+
+  const closeFee = pos.sizeUsd * config.perps.openCloseFeeRate;
+  const pnlUsd = rawPnl - pos.borrowFeeUsd - closeFee;
+
+  state.perpBalanceUsd += pos.collateralUsd + pnlUsd;
+  state.realizedPerpPnlUsd += pnlUsd;
+  delete state.perpPositions[market];
+
+  return { pnlUsd };
+}
+
 export function applyResult(
   state: State,
   intent: TradeIntent,
@@ -292,11 +396,18 @@ export function applyResult(
     applyBuy(state, intent, result);
     return undefined;
   }
-  return applySell(state, intent, result);
+  if (intent.action === "sell") {
+    return applySell(state, intent, result);
+  }
+  return undefined;
 }
 
 export function getSummary(state: State): string {
   const cashSol = Number(toBigint(state.cashLamports)) / 1_000_000_000;
   const realizedSol = Number(toBigint(state.realizedPnlLamports)) / 1_000_000_000;
-  return `cash=${cashSol.toFixed(4)} SOL, realized=${realizedSol.toFixed(4)} SOL, positions=${Object.keys(state.positions).length}, fills=${state.filledCount}, fails=${state.failedCount}`;
+  const perpCount = Object.keys(state.perpPositions).length;
+  const perpSuffix = perpCount > 0 || state.realizedPerpPnlUsd !== 0
+    ? `, perpBal=$${state.perpBalanceUsd.toFixed(2)}, perpPnl=$${state.realizedPerpPnlUsd.toFixed(2)}, perps=${perpCount}`
+    : "";
+  return `cash=${cashSol.toFixed(4)} SOL, realized=${realizedSol.toFixed(4)} SOL, positions=${Object.keys(state.positions).length}, fills=${state.filledCount}, fails=${state.failedCount}${perpSuffix}`;
 }
