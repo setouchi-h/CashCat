@@ -104,7 +104,7 @@ function makeIntentId(symbol: string, action: "buy" | "sell"): string {
 }
 
 // ---------------------------------------------------------------------------
-// checkStopLoss — returns sell intents for positions that hit stop-loss or max hold
+// checkStopLoss — returns sell intents for positions that hit stop-loss
 // ---------------------------------------------------------------------------
 
 export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
@@ -126,7 +126,6 @@ export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
     return [];
   }
 
-  const nowMs = Date.now();
   const intents: TradeIntent[] = [];
 
   for (const [mint, position] of Object.entries(state.positions)) {
@@ -151,12 +150,7 @@ export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
       solPriceUsd
     );
 
-    const holdMinutes = Math.max(0, (nowMs - Date.parse(position.openedAt)) / 60_000);
-
-    const isStopLoss = pnlPct <= config.stopLossPct;
-    const isTimeout = holdMinutes >= config.maxHoldMinutes;
-
-    if (!isStopLoss && !isTimeout) continue;
+    if (pnlPct > config.stopLossPct) continue;
 
     const sellRaw = calcSellRaw(rawAmount);
     if (sellRaw <= 0n) continue;
@@ -170,9 +164,7 @@ export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
       }
     }
 
-    const reason = isStopLoss
-      ? `stop-loss pnl=${(pnlPct * 100).toFixed(2)}%`
-      : `timeout hold=${holdMinutes.toFixed(0)}min`;
+    const reason = `stop-loss pnl=${(pnlPct * 100).toFixed(2)}%`;
 
     log.info(`[StopLoss] ${position.symbol}: ${reason}`);
 
@@ -188,7 +180,6 @@ export async function checkStopLoss(state: State): Promise<TradeIntent[]> {
         tokenSymbol: position.symbol,
         reason,
         pnlPct,
-        holdMinutes,
       },
     });
   }

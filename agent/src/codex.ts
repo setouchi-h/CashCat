@@ -368,7 +368,9 @@ Returns JSON: { "<mint>": { "usdPrice": number, "priceChange24h": number, "liqui
 - Min trade: ${config.minTradeSol} SOL
 - Max open positions: ${config.maxOpenPositions}
 - Max slippage: ${config.maxSlippageBps} bps, default slippage: ${config.intentSlippageBps} bps
-- Stop-loss / take-profit / timeout are handled by the engine automatically. Do NOT generate stop-loss sells.
+- Stop-loss is handled by the engine automatically. Do NOT generate stop-loss sells.
+- Spot positions have NO hold-time limit. You decide when to sell based on market conditions.
+- Perp positions have an engine-enforced timeout (${config.perps.maxHoldMinutes} min) due to borrow costs.
 
 ${buildPerpPromptSection(state)}== Output Format ==
 Return ONLY valid JSON (no markdown, no explanation) with keys:

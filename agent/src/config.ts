@@ -58,7 +58,7 @@ export const config = {
     maxOpenPerps: 3,
     stopLossPct: -0.15,
     takeProfitPct: 0.20,
-    maxHoldMinutes: 240,
+    maxHoldMinutes: 480,
     maxCollateralPct: 0.30,
     openCloseFeeRate: 0.0007,
     hourlyBorrowRate: 0.00001,
