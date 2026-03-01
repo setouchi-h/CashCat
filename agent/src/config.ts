@@ -51,6 +51,10 @@ export const config = {
   dashboardPort: Number(process.env.DASHBOARD_PORT) || 8787,
   solanaWalletAddress: parseOptional(process.env.SOLANA_WALLET_ADDRESS) ?? "",
   solanaRpcUrl: parseOptional(process.env.SOLANA_RPC_URL) ?? "https://api.mainnet-beta.solana.com",
+  swapRetryOnSlippage: {
+    maxRetries: 2,           // max retries: original → 1/2 → 1/4
+    minAmountLamports: 1000, // give up below this
+  },
   perps: {
     enabled: process.env.RUNTIME_PERPS_ENABLED === "true",
     initialBalanceUsd: parseNumber(process.env.RUNTIME_PERPS_INITIAL_BALANCE_USD, 500),

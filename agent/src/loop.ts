@@ -67,6 +67,15 @@ function createMutex(): Mutex {
 }
 
 // ---------------------------------------------------------------------------
+// Slippage error detection for swap retry logic
+// ---------------------------------------------------------------------------
+
+function isSlippageError(error: string | undefined): boolean {
+  if (!error) return false;
+  return /0x1788|SlippageToleranceExceeded|Slippage/i.test(error);
+}
+
+// ---------------------------------------------------------------------------
 // executeIntent — validate and execute a single trade intent
 // ---------------------------------------------------------------------------
 
@@ -99,16 +108,39 @@ async function executeIntent(
     slippageBps: intent.slippageBps,
   };
 
-  const result = await executeSwap(intent.id, order);
-  applyResult(state, intent, result);
+  let result = await executeSwap(intent.id, order);
+  const retryCfg = config.swapRetryOnSlippage;
+  let currentAmount = intent.amountLamports;
+  const symbol = intent.metadata?.tokenSymbol ?? intent.outputMint.slice(0, 6);
+
+  for (let retry = 1; retry <= retryCfg.maxRetries; retry++) {
+    if (result.success) break;
+    if (!isSlippageError(result.error)) break;
+
+    const prevAmount = currentAmount;
+    currentAmount = Math.floor(currentAmount / 2);
+    if (currentAmount < retryCfg.minAmountLamports) {
+      log.warn(`[Retry] ${intent.action.toUpperCase()} ${symbol}: halved amount ${currentAmount} < min ${retryCfg.minAmountLamports}, giving up`);
+      break;
+    }
+
+    log.info(`[Retry] ${intent.action.toUpperCase()} ${symbol} retry=${retry}/${retryCfg.maxRetries} amount=${prevAmount}→${currentAmount}`);
+    const retryOrder: TradeOrder = { ...order, amountLamports: currentAmount };
+    result = await executeSwap(`${intent.id}-retry${retry}`, retryOrder);
+  }
+
+  const retryIntent = currentAmount !== intent.amountLamports
+    ? { ...intent, amountLamports: currentAmount }
+    : intent;
+  applyResult(state, retryIntent, result);
 
   if (result.success) {
     log.info(
-      `[Filled] ${intent.action.toUpperCase()} ${intent.metadata?.tokenSymbol ?? intent.outputMint.slice(0, 6)} tx=${result.txHash ?? "n/a"}`
+      `[Filled] ${intent.action.toUpperCase()} ${symbol} tx=${result.txHash ?? "n/a"}`
     );
   } else {
     log.warn(
-      `[Failed] ${intent.action.toUpperCase()} ${intent.metadata?.tokenSymbol ?? intent.outputMint.slice(0, 6)}: ${result.error}`
+      `[Failed] ${intent.action.toUpperCase()} ${symbol}: ${result.error}`
     );
   }
 }
