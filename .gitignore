@@ -7,3 +7,4 @@ dist/
 data/
 *.jsonl
 .DS_Store
+agent/observations.md
