@@ -228,6 +228,16 @@ export async function checkPerpStopLoss(state: State): Promise<TradeIntent[]> {
     const underlyingMint = pos.underlyingMint;
     if (!underlyingMint) continue;
 
+    // Backoff: after 3+ consecutive close failures, retry only every 5 minutes
+    if (pos.closeFailCount && pos.closeFailCount >= 3 && pos.lastCloseFailedAt) {
+      const msSinceFail = nowMs - Date.parse(pos.lastCloseFailedAt);
+      const backoffMs = 5 * 60 * 1000; // 5 minutes
+      if (msSinceFail < backoffMs) {
+        continue; // skip — still in backoff period
+      }
+      log.info(`[PerpStopLoss] ${market}: backoff expired (${pos.closeFailCount} prior failures), retrying close`);
+    }
+
     const markPrice = prices[underlyingMint] ?? 0;
     if (markPrice <= 0) continue;
 
@@ -281,6 +291,34 @@ export async function checkPerpStopLoss(state: State): Promise<TradeIntent[]> {
   }
 
   return intents;
+}
+
+// ---------------------------------------------------------------------------
+// checkPerpWriteOffs — returns market names that should be written off
+// ---------------------------------------------------------------------------
+
+export function checkPerpWriteOffs(state: State): string[] {
+  const writeOffs: string[] = [];
+  const nowMs = Date.now();
+
+  for (const [market, pos] of Object.entries(state.perpPositions)) {
+    const failCount = pos.closeFailCount ?? 0;
+    const openedMs = Date.parse(pos.openedAt);
+    const openHours = (nowMs - openedMs) / 3_600_000;
+
+    // Condition 1: 10+ consecutive close failures
+    if (failCount >= 10) {
+      writeOffs.push(market);
+      continue;
+    }
+
+    // Condition 2: opened 24h+ AND 3+ close failures
+    if (openHours >= 24 && failCount >= 3) {
+      writeOffs.push(market);
+    }
+  }
+
+  return writeOffs;
 }
 
 // ---------------------------------------------------------------------------

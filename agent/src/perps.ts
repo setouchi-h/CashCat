@@ -1,493 +1,238 @@
 import {
   Connection,
+  Keypair,
   PublicKey,
-  SystemProgram,
-  TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
   ComputeBudgetProgram,
 } from "@solana/web3.js";
 import {
-  TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync,
-  createAssociatedTokenAccountIdempotentInstruction,
-  createSyncNativeInstruction,
-  createCloseAccountInstruction,
-  NATIVE_MINT,
-} from "@solana/spl-token";
-import { BorshCoder } from "@coral-xyz/anchor";
+  DriftClient,
+  getMarketOrderParams,
+  PositionDirection,
+  BASE_PRECISION,
+  PRICE_PRECISION,
+  initialize,
+  type DriftClientConfig,
+} from "@drift-labs/sdk";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import BN from "bn.js";
 import { config } from "./config.js";
 import { createLogger } from "./logger.js";
 
+// ---------------------------------------------------------------------------
+// USDC Constants
+// ---------------------------------------------------------------------------
+
+const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const USDC_SPOT_MARKET_INDEX = 0;
+const USDC_DECIMALS = 6;
+
 const log = createLogger("perps");
 
 // ---------------------------------------------------------------------------
-// Constants
+// Drift Market Registry
 // ---------------------------------------------------------------------------
 
-const PERPETUALS_PROGRAM_ID = new PublicKey(
-  "PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu"
-);
-const JLP_POOL = new PublicKey(
-  "5BUwFW4nRbftYTDMbgxykoFWqWHPzahFSNAaaaJtVKsq"
-);
-const EVENT_AUTHORITY = new PublicKey(
-  "37hJBDnntwqhGbK7L6M1bLyvccj4u55CCUiLPdYkiqBN"
-);
+interface DriftMarketInfo {
+  marketIndex: number;
+  symbol: string;
+  underlyingMint: string;
+}
 
-const SOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
-const ETH_MINT = new PublicKey("7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs");
-const BTC_MINT = new PublicKey("3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh");
-const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const DRIFT_MARKETS: Map<string, DriftMarketInfo> = new Map([
+  ["SOL-PERP", { marketIndex: 0, symbol: "SOL-PERP", underlyingMint: "So11111111111111111111111111111111111111112" }],
+  ["BTC-PERP", { marketIndex: 1, symbol: "BTC-PERP", underlyingMint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh" }],
+  ["ETH-PERP", { marketIndex: 2, symbol: "ETH-PERP", underlyingMint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs" }],
+  ["1MBONK-PERP", { marketIndex: 4, symbol: "1MBONK-PERP", underlyingMint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263" }],
+  ["1MPEPE-PERP", { marketIndex: 5, symbol: "1MPEPE-PERP", underlyingMint: "HRQke5DKdDo3jV7ja6Vs9eqrzMFqiGuMsTCCTUBCUdax" }],
+  ["1MWEN-PERP", { marketIndex: 9, symbol: "1MWEN-PERP", underlyingMint: "WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk" }],
+  ["W-PERP", { marketIndex: 13, symbol: "W-PERP", underlyingMint: "85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ" }],
+  ["TNSR-PERP", { marketIndex: 14, symbol: "TNSR-PERP", underlyingMint: "TNSRxcUxoT9xBG3de7PiJyTDYu7kskLqcpddxnEJAS6" }],
+  ["JTO-PERP", { marketIndex: 15, symbol: "JTO-PERP", underlyingMint: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL" }],
+  ["WIF-PERP", { marketIndex: 23, symbol: "WIF-PERP", underlyingMint: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm" }],
+  ["JUP-PERP", { marketIndex: 24, symbol: "JUP-PERP", underlyingMint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" }],
+  ["RENDER-PERP", { marketIndex: 26, symbol: "RENDER-PERP", underlyingMint: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof" }],
+  ["PYTH-PERP", { marketIndex: 28, symbol: "PYTH-PERP", underlyingMint: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3" }],
+  ["HNT-PERP", { marketIndex: 29, symbol: "HNT-PERP", underlyingMint: "hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrdu1oxWux" }],
+  ["INJ-PERP", { marketIndex: 32, symbol: "INJ-PERP", underlyingMint: "6McPRfPV6bY1e9hLxWyG54W9i9Epq75QBvXg2oetBVTB" }],
+  ["ORCA-PERP", { marketIndex: 36, symbol: "ORCA-PERP", underlyingMint: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE" }],
+  ["PENGU-PERP", { marketIndex: 42, symbol: "PENGU-PERP", underlyingMint: "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv" }],
+  ["AI16Z-PERP", { marketIndex: 48, symbol: "AI16Z-PERP", underlyingMint: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC" }],
+  ["TRUMP-PERP", { marketIndex: 50, symbol: "TRUMP-PERP", underlyingMint: "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN" }],
+  ["MELANIA-PERP", { marketIndex: 52, symbol: "MELANIA-PERP", underlyingMint: "FUAfBo2jgks6gB4Z4LfZkqSZgzNucisEHqnNebaRxM1P" }],
+  ["VINE-PERP", { marketIndex: 55, symbol: "VINE-PERP", underlyingMint: "6AJcP7wuLwmRYLBNbi825wgguaPsWzPBEHcHndpRpump" }],
+]);
 
-// Custody addresses per asset
-const CUSTODY = {
-  SOL: new PublicKey("7xS2gz2bTp3fwCC7knJvUWTEU9Tycczu6VhJYKgi1wdz"),
-  ETH: new PublicKey("AQCGyheWPLeo6Qp9WpYS9m3Qj479t7R636N9ey1rEjEn"),
-  BTC: new PublicKey("5Pv3gM9JrFFH883SWAhvJC9RPYmo8UNxuFtv5bMMALkm"),
-  USDC: new PublicKey("G18jKKXQwBbrHeiK3C9MRXhkHsLHf7XgCSisykV46EZa"),
-} as const;
-
-// Underlying mint per market key
-const MARKET_MINT: Record<string, PublicKey> = {
-  "SOL-PERP": SOL_MINT,
-  "ETH-PERP": ETH_MINT,
-  "BTC-PERP": BTC_MINT,
+// Alias map: common name → canonical Drift name
+const MARKET_ALIASES: Record<string, string> = {
+  "BONK-PERP": "1MBONK-PERP",
+  "PEPE-PERP": "1MPEPE-PERP",
+  "WEN-PERP": "1MWEN-PERP",
 };
 
-const MARKET_CUSTODY: Record<string, PublicKey> = {
-  "SOL-PERP": CUSTODY.SOL,
-  "ETH-PERP": CUSTODY.ETH,
-  "BTC-PERP": CUSTODY.BTC,
-};
-
-// For longs: collateral custody = market custody (SOL for SOL-PERP)
-// For shorts: collateral custody = USDC
-function getCollateralCustody(side: "long" | "short", market: string): PublicKey {
-  return side === "long" ? MARKET_CUSTODY[market] : CUSTODY.USDC;
+export function getDriftMarket(name: string): DriftMarketInfo | null {
+  const upper = name.trim().toUpperCase();
+  const canonical = MARKET_ALIASES[upper] ?? upper;
+  return DRIFT_MARKETS.get(canonical) ?? null;
 }
 
-function getCollateralMint(side: "long" | "short", market: string): PublicKey {
-  return side === "long" ? MARKET_MINT[market] : USDC_MINT;
+export function resolveMarketName(name: string): string {
+  const upper = name.trim().toUpperCase();
+  return MARKET_ALIASES[upper] ?? upper;
 }
 
-// Side enum values
-const SIDE_LONG = 1;
-const SIDE_SHORT = 2;
-
-// USD amounts use 6 decimals on-chain
-const USD_DECIMALS = 6;
-
-// Compute budget
-const PRIORITY_FEE_MICRO_LAMPORTS = 100_000;
-
-// ---------------------------------------------------------------------------
-// Minimal IDL — only the instructions we need
-// ---------------------------------------------------------------------------
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const PERPETUALS_IDL: any = {
-  version: "0.1.0",
-  name: "perpetuals",
-  instructions: [
-    {
-      name: "createIncreasePositionMarketRequest",
-      discriminator: [183, 198, 97, 169, 35, 1, 225, 57],
-      accounts: [
-        { name: "owner", isMut: true, isSigner: true },
-        { name: "fundingAccount", isMut: true, isSigner: false },
-        { name: "perpetuals", isMut: false, isSigner: false },
-        { name: "pool", isMut: false, isSigner: false },
-        { name: "position", isMut: true, isSigner: false },
-        { name: "positionRequest", isMut: true, isSigner: false },
-        { name: "positionRequestAta", isMut: true, isSigner: false },
-        { name: "custody", isMut: false, isSigner: false },
-        { name: "collateralCustody", isMut: false, isSigner: false },
-        { name: "inputMint", isMut: false, isSigner: false },
-        { name: "referral", isMut: false, isSigner: false },
-        { name: "tokenProgram", isMut: false, isSigner: false },
-        { name: "associatedTokenProgram", isMut: false, isSigner: false },
-        { name: "systemProgram", isMut: false, isSigner: false },
-        { name: "eventAuthority", isMut: false, isSigner: false },
-        { name: "program", isMut: false, isSigner: false },
-      ],
-      args: [
-        {
-          name: "params",
-          type: {
-            defined: { name: "CreateIncreasePositionMarketRequestParams" },
-          },
-        },
-      ],
-    },
-    {
-      name: "createDecreasePositionMarketRequest",
-      discriminator: [147, 238, 76, 91, 48, 86, 167, 253],
-      accounts: [
-        { name: "owner", isMut: true, isSigner: true },
-        { name: "receivingAccount", isMut: true, isSigner: false },
-        { name: "perpetuals", isMut: false, isSigner: false },
-        { name: "pool", isMut: false, isSigner: false },
-        { name: "position", isMut: false, isSigner: false },
-        { name: "positionRequest", isMut: true, isSigner: false },
-        { name: "positionRequestAta", isMut: true, isSigner: false },
-        { name: "custody", isMut: false, isSigner: false },
-        { name: "collateralCustody", isMut: false, isSigner: false },
-        { name: "desiredMint", isMut: false, isSigner: false },
-        { name: "referral", isMut: false, isSigner: false },
-        { name: "tokenProgram", isMut: false, isSigner: false },
-        { name: "associatedTokenProgram", isMut: false, isSigner: false },
-        { name: "systemProgram", isMut: false, isSigner: false },
-        { name: "eventAuthority", isMut: false, isSigner: false },
-        { name: "program", isMut: false, isSigner: false },
-      ],
-      args: [
-        {
-          name: "params",
-          type: {
-            defined: { name: "CreateDecreasePositionMarketRequestParams" },
-          },
-        },
-      ],
-    },
-  ],
-  accounts: [],
-  types: [
-    {
-      name: "CreateIncreasePositionMarketRequestParams",
-      type: {
-        kind: "struct",
-        fields: [
-          { name: "sizeUsdDelta", type: "u64" },
-          { name: "collateralTokenDelta", type: "u64" },
-          { name: "side", type: { defined: { name: "Side" } } },
-          { name: "priceSlippage", type: "u64" },
-          { name: "jupiterMinimumOut", type: { option: "u64" } },
-          { name: "counter", type: "u64" },
-        ],
-      },
-    },
-    {
-      name: "CreateDecreasePositionMarketRequestParams",
-      type: {
-        kind: "struct",
-        fields: [
-          { name: "collateralUsdDelta", type: "u64" },
-          { name: "sizeUsdDelta", type: "u64" },
-          { name: "priceSlippage", type: "u64" },
-          { name: "jupiterMinimumOut", type: { option: "u64" } },
-          { name: "entirePosition", type: { option: "bool" } },
-          { name: "counter", type: "u64" },
-        ],
-      },
-    },
-    {
-      name: "Side",
-      type: {
-        kind: "enum",
-        variants: [
-          { name: "None" },
-          { name: "Long" },
-          { name: "Short" },
-        ],
-      },
-    },
-  ],
-  errors: [],
-  metadata: { address: PERPETUALS_PROGRAM_ID.toBase58() },
-};
-
-const coder = new BorshCoder(PERPETUALS_IDL);
-
-// ---------------------------------------------------------------------------
-// PDA helpers
-// ---------------------------------------------------------------------------
-
-function findPerpetualsPda(): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("perpetuals")],
-    PERPETUALS_PROGRAM_ID
-  );
-  return pda;
-}
-
-function findPositionPda(
-  owner: PublicKey,
-  custody: PublicKey,
-  collateralCustody: PublicKey,
-  side: "long" | "short"
-): PublicKey {
-  const sideByte = side === "long" ? SIDE_LONG : SIDE_SHORT;
-  const [pda] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("position"),
-      owner.toBuffer(),
-      JLP_POOL.toBuffer(),
-      custody.toBuffer(),
-      collateralCustody.toBuffer(),
-      Buffer.from([sideByte]),
-    ],
-    PERPETUALS_PROGRAM_ID
-  );
-  return pda;
-}
-
-function findPositionRequestPda(
-  position: PublicKey,
-  counter: BN,
-  requestChange: "increase" | "decrease"
-): PublicKey {
-  const changeByte = requestChange === "increase" ? 1 : 2;
-  const [pda] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("position_request"),
-      position.toBuffer(),
-      counter.toArrayLike(Buffer, "le", 8),
-      Buffer.from([changeByte]),
-    ],
-    PERPETUALS_PROGRAM_ID
-  );
-  return pda;
+export function getAvailableMarkets(): DriftMarketInfo[] {
+  return Array.from(DRIFT_MARKETS.values());
 }
 
 // ---------------------------------------------------------------------------
-// Instruction builders
+// ReadOnly Wallet (satisfies Anchor Wallet interface for read-only DriftClient)
 // ---------------------------------------------------------------------------
 
-function encodeInstruction(
-  name: string,
-  data: Record<string, unknown>
-): Buffer {
-  return coder.instruction.encode(name, data) as unknown as Buffer;
-}
+class ReadOnlyWallet {
+  readonly publicKey: PublicKey;
+  readonly payer: Keypair;
 
-function buildIncreasePositionIx(params: {
-  owner: PublicKey;
-  fundingAccount: PublicKey;
-  position: PublicKey;
-  positionRequest: PublicKey;
-  positionRequestAta: PublicKey;
-  custody: PublicKey;
-  collateralCustody: PublicKey;
-  inputMint: PublicKey;
-  sizeUsdDelta: BN;
-  collateralTokenDelta: BN;
-  side: "long" | "short";
-  priceSlippage: BN;
-  counter: BN;
-}): TransactionInstruction {
-  const sideValue = params.side === "long" ? { Long: {} } : { Short: {} };
+  constructor(pubkey: PublicKey) {
+    this.publicKey = pubkey;
+    // Dummy keypair — we never actually sign with it
+    this.payer = Keypair.generate();
+  }
 
-  const data = encodeInstruction("createIncreasePositionMarketRequest", {
-    params: {
-      sizeUsdDelta: params.sizeUsdDelta,
-      collateralTokenDelta: params.collateralTokenDelta,
-      side: sideValue,
-      priceSlippage: params.priceSlippage,
-      jupiterMinimumOut: null,
-      counter: params.counter,
-    },
-  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async signTransaction(tx: any): Promise<any> {
+    throw new Error("ReadOnlyWallet cannot sign transactions");
+  }
 
-  const keys = [
-    { pubkey: params.owner, isSigner: true, isWritable: true },
-    { pubkey: params.fundingAccount, isSigner: false, isWritable: true },
-    { pubkey: findPerpetualsPda(), isSigner: false, isWritable: false },
-    { pubkey: JLP_POOL, isSigner: false, isWritable: false },
-    { pubkey: params.position, isSigner: false, isWritable: true },
-    { pubkey: params.positionRequest, isSigner: false, isWritable: true },
-    { pubkey: params.positionRequestAta, isSigner: false, isWritable: true },
-    { pubkey: params.custody, isSigner: false, isWritable: false },
-    { pubkey: params.collateralCustody, isSigner: false, isWritable: false },
-    { pubkey: params.inputMint, isSigner: false, isWritable: false },
-    { pubkey: PERPETUALS_PROGRAM_ID, isSigner: false, isWritable: false }, // referral = program (null)
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-    { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    { pubkey: EVENT_AUTHORITY, isSigner: false, isWritable: false },
-    { pubkey: PERPETUALS_PROGRAM_ID, isSigner: false, isWritable: false },
-  ];
-
-  return new TransactionInstruction({
-    programId: PERPETUALS_PROGRAM_ID,
-    keys,
-    data,
-  });
-}
-
-function buildDecreasePositionIx(params: {
-  owner: PublicKey;
-  receivingAccount: PublicKey;
-  position: PublicKey;
-  positionRequest: PublicKey;
-  positionRequestAta: PublicKey;
-  custody: PublicKey;
-  collateralCustody: PublicKey;
-  desiredMint: PublicKey;
-  priceSlippage: BN;
-  entirePosition: boolean;
-  counter: BN;
-}): TransactionInstruction {
-  const data = encodeInstruction("createDecreasePositionMarketRequest", {
-    params: {
-      collateralUsdDelta: new BN(0),
-      sizeUsdDelta: new BN(0),
-      priceSlippage: params.priceSlippage,
-      jupiterMinimumOut: null,
-      entirePosition: params.entirePosition,
-      counter: params.counter,
-    },
-  });
-
-  const keys = [
-    { pubkey: params.owner, isSigner: true, isWritable: true },
-    { pubkey: params.receivingAccount, isSigner: false, isWritable: true },
-    { pubkey: findPerpetualsPda(), isSigner: false, isWritable: false },
-    { pubkey: JLP_POOL, isSigner: false, isWritable: false },
-    { pubkey: params.position, isSigner: false, isWritable: false },
-    { pubkey: params.positionRequest, isSigner: false, isWritable: true },
-    { pubkey: params.positionRequestAta, isSigner: false, isWritable: true },
-    { pubkey: params.custody, isSigner: false, isWritable: false },
-    { pubkey: params.collateralCustody, isSigner: false, isWritable: false },
-    { pubkey: params.desiredMint, isSigner: false, isWritable: false },
-    { pubkey: PERPETUALS_PROGRAM_ID, isSigner: false, isWritable: false }, // referral = program (null)
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-    { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    { pubkey: EVENT_AUTHORITY, isSigner: false, isWritable: false },
-    { pubkey: PERPETUALS_PROGRAM_ID, isSigner: false, isWritable: false },
-  ];
-
-  return new TransactionInstruction({
-    programId: PERPETUALS_PROGRAM_ID,
-    keys,
-    data,
-  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async signAllTransactions(txs: any[]): Promise<any[]> {
+    throw new Error("ReadOnlyWallet cannot sign transactions");
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// DriftClient singleton (lazy init)
 // ---------------------------------------------------------------------------
+
+let cachedDriftClient: DriftClient | null = null;
+let cachedWalletPubkey: string | null = null;
 
 function getRpcUrl(): string {
-  return (
-    process.env.SOLANA_RPC_URL ??
-    "https://api.mainnet-beta.solana.com"
-  );
+  return process.env.SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com";
 }
 
 function getConnection(): Connection {
   return new Connection(getRpcUrl(), "confirmed");
 }
 
+async function createReadOnlyDriftClient(walletPubkey: PublicKey): Promise<DriftClient> {
+  const pubkeyStr = walletPubkey.toBase58();
+
+  if (cachedDriftClient && cachedWalletPubkey === pubkeyStr) {
+    return cachedDriftClient;
+  }
+
+  // Clean up previous client
+  if (cachedDriftClient) {
+    try {
+      await cachedDriftClient.unsubscribe();
+    } catch {
+      // ignore cleanup errors
+    }
+    cachedDriftClient = null;
+    cachedWalletPubkey = null;
+  }
+
+  const connection = getConnection();
+  const wallet = new ReadOnlyWallet(walletPubkey);
+
+  const sdkConfig = initialize({
+    env: config.perps.driftEnv as "mainnet-beta" | "devnet",
+  });
+
+  const driftConfig: DriftClientConfig = {
+    connection: connection as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- web3.js version mismatch
+    wallet: wallet as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    programID: new PublicKey(sdkConfig.DRIFT_PROGRAM_ID),
+    accountSubscription: {
+      type: "websocket",
+    },
+    activeSubAccountId: 0,
+    subAccountIds: [0],
+    env: config.perps.driftEnv as "mainnet-beta" | "devnet",
+  };
+
+  const client = new DriftClient(driftConfig);
+  await client.subscribe();
+
+  cachedDriftClient = client;
+  cachedWalletPubkey = pubkeyStr;
+
+  log.info(`DriftClient initialized for ${pubkeyStr}`);
+  return client;
+}
+
+// ---------------------------------------------------------------------------
+// Compute budget
+// ---------------------------------------------------------------------------
+
+const PRIORITY_FEE_MICRO_LAMPORTS = 100_000;
+
+// ---------------------------------------------------------------------------
+// Public API — buildOpenPositionTx
+// ---------------------------------------------------------------------------
+
 export async function buildOpenPositionTx(
   walletPubkey: PublicKey,
   market: string,
   side: "long" | "short",
   leverage: number,
-  collateralAmount: number,
+  collateralUsd: number,
   currentPriceUsd: number
 ): Promise<string> {
-  const custody = MARKET_CUSTODY[market];
-  const collateralCustody = getCollateralCustody(side, market);
-  const inputMint = getCollateralMint(side, market);
+  const resolved = resolveMarketName(market);
+  const marketInfo = getDriftMarket(resolved);
+  if (!marketInfo) throw new Error(`Unknown Drift market: ${market}`);
 
-  if (!custody) throw new Error(`Unknown market: ${market}`);
+  const client = await createReadOnlyDriftClient(walletPubkey);
 
-  const position = findPositionPda(walletPubkey, custody, collateralCustody, side);
-  const counter = new BN(Math.floor(Math.random() * 1_000_000_000));
-  const positionRequest = findPositionRequestPda(position, counter, "increase");
-  const positionRequestAta = getAssociatedTokenAddressSync(
-    inputMint,
-    positionRequest,
-    true // allowOwnerOffCurve — PDA owner
+  // --- USDC deposit into Drift margin account ---
+  const usdcAmount = new BN(Math.floor(collateralUsd * 10 ** USDC_DECIMALS));
+  const usdcAta = getAssociatedTokenAddressSync(USDC_MINT, walletPubkey);
+  const depositIx = await client.getDepositInstruction(
+    usdcAmount,
+    USDC_SPOT_MARKET_INDEX,
+    usdcAta
   );
 
-  const sizeUsd = collateralAmount * leverage;
-  const sizeUsdDelta = new BN(Math.floor(sizeUsd * 10 ** USD_DECIMALS));
-
-  // collateralTokenDelta: native amount of collateral token
-  // For SOL longs: collateral in lamports
-  // For shorts: collateral in USDC (6 decimals)
-  let collateralTokenDelta: BN;
-  if (inputMint.equals(SOL_MINT)) {
-    // Convert USD to SOL lamports
-    const solAmount = collateralAmount / currentPriceUsd;
-    collateralTokenDelta = new BN(Math.floor(solAmount * 1_000_000_000));
-  } else if (inputMint.equals(USDC_MINT)) {
-    collateralTokenDelta = new BN(Math.floor(collateralAmount * 10 ** 6));
-  } else {
-    throw new Error(`Unsupported collateral mint: ${inputMint.toBase58()}`);
-  }
-
-  // Price slippage: max acceptable entry price (with 10% buffer)
-  const slippageMultiplier = side === "long" ? 1.10 : 0.90;
-  const priceSlippage = new BN(
-    Math.floor(currentPriceUsd * slippageMultiplier * 10 ** USD_DECIMALS)
+  // --- Perp order ---
+  const sizeUsd = collateralUsd * leverage;
+  const baseAssetAmount = new BN(
+    Math.floor((sizeUsd / currentPriceUsd) * BASE_PRECISION.toNumber())
   );
 
-  const instructions: TransactionInstruction[] = [];
+  const direction =
+    side === "long" ? PositionDirection.LONG : PositionDirection.SHORT;
 
-  // Compute budget
-  instructions.push(
+  const orderParams = getMarketOrderParams({
+    marketIndex: marketInfo.marketIndex,
+    direction,
+    baseAssetAmount,
+  });
+
+  const orderIx = await client.getPlacePerpOrderIx(orderParams);
+
+  const instructions = [
     ComputeBudgetProgram.setComputeUnitPrice({
       microLamports: PRIORITY_FEE_MICRO_LAMPORTS,
-    })
-  );
+    }),
+    depositIx,
+    orderIx,
+  ];
 
-  // wSOL wrap if needed
-  const isNativeSol = inputMint.equals(NATIVE_MINT);
-  const fundingAccount = getAssociatedTokenAddressSync(inputMint, walletPubkey);
-
-  if (isNativeSol) {
-    instructions.push(
-      createAssociatedTokenAccountIdempotentInstruction(
-        walletPubkey,
-        fundingAccount,
-        walletPubkey,
-        NATIVE_MINT
-      )
-    );
-    instructions.push(
-      SystemProgram.transfer({
-        fromPubkey: walletPubkey,
-        toPubkey: fundingAccount,
-        lamports: BigInt(collateralTokenDelta.toString()),
-      })
-    );
-    instructions.push(createSyncNativeInstruction(fundingAccount));
-  }
-
-  // Main instruction
-  instructions.push(
-    buildIncreasePositionIx({
-      owner: walletPubkey,
-      fundingAccount,
-      position,
-      positionRequest,
-      positionRequestAta,
-      custody,
-      collateralCustody,
-      inputMint,
-      sizeUsdDelta,
-      collateralTokenDelta,
-      side,
-      priceSlippage,
-      counter,
-    })
-  );
-
-  // Close wSOL ATA after (return rent)
-  if (isNativeSol) {
-    instructions.push(
-      createCloseAccountInstruction(fundingAccount, walletPubkey, walletPubkey)
-    );
-  }
-
-  const conn = getConnection();
-  const { blockhash } = await conn.getLatestBlockhash();
+  const connection = getConnection();
+  const { blockhash } = await connection.getLatestBlockhash();
   const messageV0 = new TransactionMessage({
     payerKey: walletPubkey,
     recentBlockhash: blockhash,
@@ -498,11 +243,15 @@ export async function buildOpenPositionTx(
   const serialized = Buffer.from(tx.serialize()).toString("base64");
 
   log.info(
-    `Built open position tx: ${market} ${side} ${leverage}x collateral=$${collateralAmount} size=$${sizeUsd}`
+    `Built Drift open tx: ${resolved} ${side} ${leverage}x collateral=$${collateralUsd.toFixed(2)} size=$${sizeUsd.toFixed(2)} deposit=${usdcAmount.toString()} USDC-raw`
   );
 
   return serialized;
 }
+
+// ---------------------------------------------------------------------------
+// Public API — buildClosePositionTx
+// ---------------------------------------------------------------------------
 
 export async function buildClosePositionTx(
   walletPubkey: PublicKey,
@@ -510,67 +259,61 @@ export async function buildClosePositionTx(
   side: "long" | "short",
   currentPriceUsd: number
 ): Promise<string> {
-  const custody = MARKET_CUSTODY[market];
-  const collateralCustody = getCollateralCustody(side, market);
-  const desiredMint = getCollateralMint(side, market);
+  const resolved = resolveMarketName(market);
+  const marketInfo = getDriftMarket(resolved);
+  if (!marketInfo) throw new Error(`Unknown Drift market: ${market}`);
 
-  if (!custody) throw new Error(`Unknown market: ${market}`);
+  const client = await createReadOnlyDriftClient(walletPubkey);
 
-  const position = findPositionPda(walletPubkey, custody, collateralCustody, side);
-  const counter = new BN(Math.floor(Math.random() * 1_000_000_000));
-  const positionRequest = findPositionRequestPda(position, counter, "decrease");
-  const positionRequestAta = getAssociatedTokenAddressSync(
-    desiredMint,
-    positionRequest,
-    true
-  );
-
-  // Price slippage for close: inverse of open
-  const slippageMultiplier = side === "long" ? 0.90 : 1.10;
-  const priceSlippage = new BN(
-    Math.floor(currentPriceUsd * slippageMultiplier * 10 ** USD_DECIMALS)
-  );
-
-  const receivingAccount = getAssociatedTokenAddressSync(desiredMint, walletPubkey);
-
-  const instructions: TransactionInstruction[] = [];
-
-  instructions.push(
-    ComputeBudgetProgram.setComputeUnitPrice({
-      microLamports: PRIORITY_FEE_MICRO_LAMPORTS,
-    })
-  );
-
-  // Ensure receiving ATA exists
-  if (desiredMint.equals(NATIVE_MINT)) {
-    instructions.push(
-      createAssociatedTokenAccountIdempotentInstruction(
-        walletPubkey,
-        receivingAccount,
-        walletPubkey,
-        NATIVE_MINT
-      )
+  // Read the actual on-chain position to get the exact baseAssetAmount.
+  // Using an inflated amount causes Drift's margin check to compute a huge
+  // margin requirement and reject the order with InsufficientCollateral.
+  let baseAssetAmount: BN;
+  try {
+    const user = client.getUser();
+    const perpPosition = user.getPerpPosition(marketInfo.marketIndex);
+    if (perpPosition && !perpPosition.baseAssetAmount.isZero()) {
+      baseAssetAmount = perpPosition.baseAssetAmount.abs();
+      log.info(
+        `On-chain position found: ${resolved} baseAssetAmount=${baseAssetAmount.toString()}`
+      );
+    } else {
+      throw new Error("no on-chain position");
+    }
+  } catch (e) {
+    // Fallback: estimate from current price (much better than 1M SOL)
+    log.warn(
+      `Could not read on-chain position for ${resolved}, estimating from state: ${e instanceof Error ? e.message : String(e)}`
+    );
+    // Will be overridden by caller-provided fallback if available
+    throw new Error(
+      `Cannot build close tx: on-chain position not readable for ${resolved}. ` +
+      `Ensure DriftClient user subscription is active.`
     );
   }
 
-  instructions.push(
-    buildDecreasePositionIx({
-      owner: walletPubkey,
-      receivingAccount,
-      position,
-      positionRequest,
-      positionRequestAta,
-      custody,
-      collateralCustody,
-      desiredMint,
-      priceSlippage,
-      entirePosition: true,
-      counter,
-    })
-  );
+  // Close = opposite direction + reduceOnly
+  const closeDirection =
+    side === "long" ? PositionDirection.SHORT : PositionDirection.LONG;
 
-  const conn = getConnection();
-  const { blockhash } = await conn.getLatestBlockhash();
+  const orderParams = getMarketOrderParams({
+    marketIndex: marketInfo.marketIndex,
+    direction: closeDirection,
+    baseAssetAmount,
+    reduceOnly: true,
+  });
+
+  const ix = await client.getPlacePerpOrderIx(orderParams);
+
+  const instructions = [
+    ComputeBudgetProgram.setComputeUnitPrice({
+      microLamports: PRIORITY_FEE_MICRO_LAMPORTS,
+    }),
+    ix,
+  ];
+
+  const connection = getConnection();
+  const { blockhash } = await connection.getLatestBlockhash();
   const messageV0 = new TransactionMessage({
     payerKey: walletPubkey,
     recentBlockhash: blockhash,
@@ -580,7 +323,71 @@ export async function buildClosePositionTx(
   const tx = new VersionedTransaction(messageV0);
   const serialized = Buffer.from(tx.serialize()).toString("base64");
 
-  log.info(`Built close position tx: ${market} ${side} entirePosition=true`);
+  log.info(
+    `Built Drift close tx: ${resolved} ${side} baseAssetAmount=${baseAssetAmount.toString()}`
+  );
 
   return serialized;
+}
+
+// ---------------------------------------------------------------------------
+// Public API — buildInitializeUserTx
+// ---------------------------------------------------------------------------
+
+export async function buildInitializeUserTx(
+  walletPubkey: PublicKey
+): Promise<string | null> {
+  const client = await createReadOnlyDriftClient(walletPubkey);
+
+  // Check if user account already exists
+  try {
+    const userAccountPublicKey = await client.getUserAccountPublicKey();
+    const connection = getConnection();
+    const accountInfo = await connection.getAccountInfo(userAccountPublicKey);
+    if (accountInfo) {
+      log.info("Drift user account already exists, skipping initialization");
+      return null;
+    }
+  } catch {
+    // Account doesn't exist, proceed with initialization
+  }
+
+  const [initIxs] = await client.getInitializeUserAccountIxs();
+
+  const instructions = [
+    ComputeBudgetProgram.setComputeUnitPrice({
+      microLamports: PRIORITY_FEE_MICRO_LAMPORTS,
+    }),
+    ...initIxs,
+  ];
+
+  const connection = getConnection();
+  const { blockhash } = await connection.getLatestBlockhash();
+  const messageV0 = new TransactionMessage({
+    payerKey: walletPubkey,
+    recentBlockhash: blockhash,
+    instructions,
+  }).compileToV0Message();
+
+  const tx = new VersionedTransaction(messageV0);
+  const serialized = Buffer.from(tx.serialize()).toString("base64");
+
+  log.info("Built Drift initialize user tx");
+  return serialized;
+}
+
+// ---------------------------------------------------------------------------
+// Public API — getUsdcBalanceUsd
+// ---------------------------------------------------------------------------
+
+export async function getUsdcBalanceUsd(walletPubkey: PublicKey): Promise<number> {
+  const usdcAta = getAssociatedTokenAddressSync(USDC_MINT, walletPubkey);
+  const connection = getConnection();
+  try {
+    const resp = await connection.getTokenAccountBalance(usdcAta);
+    return Number(resp.value.uiAmount ?? 0);
+  } catch {
+    // ATA doesn't exist or RPC error → 0
+    return 0;
+  }
 }

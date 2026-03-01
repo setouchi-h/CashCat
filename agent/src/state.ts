@@ -28,6 +28,9 @@ export interface PerpPosition {
   borrowFeeUsd: number;
   openedAt: string;
   updatedAt: string;
+  // Close failure tracking (backoff)
+  closeFailCount?: number;
+  lastCloseFailedAt?: string;
 }
 
 export interface State {
@@ -145,6 +148,8 @@ function sanitizePerpPosition(pos: PerpPosition): PerpPosition {
     borrowFeeUsd: Number.isFinite(pos.borrowFeeUsd) && pos.borrowFeeUsd >= 0 ? pos.borrowFeeUsd : 0,
     openedAt: pos.openedAt || new Date().toISOString(),
     updatedAt: pos.updatedAt || new Date().toISOString(),
+    closeFailCount: Number.isFinite(pos.closeFailCount) && pos.closeFailCount! > 0 ? pos.closeFailCount : undefined,
+    lastCloseFailedAt: pos.lastCloseFailedAt || undefined,
   };
 }
 
@@ -385,6 +390,22 @@ export function applyPerpClose(
   const pnlUsd = rawPnl - pos.borrowFeeUsd - closeFee;
 
   state.perpBalanceUsd += pos.collateralUsd + pnlUsd;
+  state.realizedPerpPnlUsd += pnlUsd;
+  delete state.perpPositions[market];
+
+  return { pnlUsd };
+}
+
+export function writeOffPerp(
+  state: State,
+  market: string
+): { pnlUsd: number } {
+  const pos = state.perpPositions[market];
+  if (!pos) return { pnlUsd: 0 };
+
+  // Write off the full collateral as a loss (no price fetch needed)
+  const pnlUsd = -pos.collateralUsd;
+  state.perpBalanceUsd += 0; // collateral already deducted at open
   state.realizedPerpPnlUsd += pnlUsd;
   delete state.perpPositions[market];
 

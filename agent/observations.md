@@ -1,63 +1,87 @@
 # Market Observations
 
 ## Summary
-
-- 2026-02-28 cycles 3402-3421: SOL stayed in a deep drawdown (~-9.6% to -11.5% 24h) with choppy relief; JUP/BONK lagged and defensive USDC rotations were mixed.
-- 2026-02-28 cycles 3422-3451: SOL bounced toward ~$79.5 then faded to ~$78; a brief defensive USDC round-trip exited red and portfolio returned to all-SOL cash.
-- 2026-02-28 cycles 3452-3472: SOL ranged ~$77.9-$78.6 with weak momentum; JUP was intermittently firmer than BONK; no trades opened.
-- 2026-02-28 cycles 3473-3492: SOL stabilized then gradually improved from about -10.3% to -9.0% 24h; JUP held relative strength vs BONK.
-- 2026-02-28 cycles 3493-3512: SOL climbed into ~$79.1 and momentum improved toward about -6.6%; JUP tracked near SOL while BONK continued to lag.
-- 2026-02-28 cycles 3513-3522: SOL held a tight ~$79.09-$79.38 range with soft ~-6.7% to -6.4% momentum; no breakout follow-through.
-- 2026-02-28 cycles 3523-3532: SOL stayed near ~$79.04-$79.48 while 24h momentum improved from about -6.36% to -5.59%.
-- JUP remained roughly in-line with SOL (-6.23% to -5.31%), BONK stayed weaker (-9.55% to -8.30%), and liquidity remained stable (SOL ~$645M-$657M; JUP/BONK >$2.3M).
-- Portfolio remained unchanged at 13.7290 SOL cash, 0 open positions, realized PnL +0.0012 SOL.
-- 2026-02-28 cycles 3533-3542: SOL stayed range-bound near ~$78.76-$79.14 while 24h momentum softened then stabilized around -5.7%.
-- JUP tracked mostly in-line to slightly weaker than SOL (-5.22% to -5.97%), BONK underperformed (-8.31% to -8.65%), with liquidity steady (SOL ~$655M; JUP/BONK >$2.3M).
-- Portfolio remained all-cash at 13.7290 SOL with 0 open positions and realized PnL +0.0012 SOL.
-- 2026-02-28 cycles 3543-3553: SOL remained range-bound around ~$78.79-$79.16 while 24h momentum improved overall from about -5.9% toward -5.1%.
-- JUP mostly tracked SOL with brief relative strength, BONK stayed weaker (~-8.45% to -8.06%), and liquidity remained stable (SOL ~$654M-$655M; JUP/BONK >$2.3M).
-- Portfolio stayed unchanged at 13.7290 SOL cash, 0 open positions, realized PnL +0.0012 SOL.
+- 2026-02-28 to 2026-03-01: SOL recovered from low-$84s to high-$88s; a constrained SOL-PERP short was eventually stopped out at -$2.10, followed by a fresh SOL-PERP long entry near $87.5.
+- Portfolio held ~13.68 SOL cash with minimal realized spot PnL; JUP extended to +13% and BONK stayed mild at +2-3%.
+- 3991-4000 (2026-03-01T06:25:30Z → 06:41:23Z): SOL and JUP both displayed strong 24h momentum while SOL stayed above $86.3 and JUP near $0.171; JUP liquidity held above ~$3.2M through the run.
+- 3991-4000: Spot posture shifted toward persistent JUP accumulation (0.5 SOL repeatedly) and JUP momentum stayed positive while BONK/JTO appeared as secondary upside tails.
+- 3991-4000: Cash drifted down from 13.68 SOL to 9.18 SOL as buys continued; SOL-PERP long 2x remained open and USDC collateral stayed near $28.
 
 ## Recent
-### Cycle 3554 | 2026-02-28T12:33:55.102Z
-- SOL: $78.9788, 24h -5.14%, liq ~$654.7M
-- JUP: $0.146389, 24h -5.23%, liq ~$2.9M
-- BONK: $0.0000055712, 24h -7.90%, liq ~$2.4M
-- USDC: $1.0000, 24h +0.01%, liq ~$499.5M
-- Portfolio: 13.7290 SOL cash, 0 open positions, realized PnL +0.0012 SOL.
-### Cycle 3555 | 2026-02-28T12:36:12.611Z
-- SOL: $78.9585, 24h -5.17%, liq ~$654.4M
-- JUP: $0.146513, 24h -5.16%, liq ~$2.9M
-- BONK: $0.0000055662, 24h -7.93%, liq ~$2.4M
-- USDC: $1.0000, 24h +0.01%, liq ~$499.7M
-- Portfolio: 13.7290 SOL cash, 0 open positions, realized PnL +0.0012 SOL.
-### Cycle 3556 | 2026-02-28T12:38:18.304Z
-- SOL: $79.1152, 24h -4.79%, liq ~$654.5M
-- JUP: $0.146612, 24h -5.01%, liq ~$2.9M
-- BONK: $0.0000055626, 24h -7.79%, liq ~$2.4M
-- USDC: $0.9999, 24h -0.01%, liq ~$500.0M
-- Portfolio: 13.7290 SOL cash, 0 open positions, realized PnL +0.0012 SOL.
-### Cycle 3557 | 2026-02-28T12:40:37.640Z
-- SOL: $79.0693, 24h -4.69%, liq ~$654.6M
-- JUP: $0.146479, 24h -5.01%, liq ~$2.9M
-- BONK: $0.0000055627, 24h -8.00%, liq ~$2.4M
-- USDC: $0.9999, 24h -0.00%, liq ~$500.0M
-- Portfolio: 13.7290 SOL cash, 0 open positions, realized PnL +0.0012 SOL.
-### Cycle 3558 | 2026-02-28T12:42:02.927Z
-- SOL: $79.0232, 24h -4.54%, liq ~$654.7M
-- JUP: $0.146401, 24h -5.23%, liq ~$2.9M
-- BONK: $0.0000055647, 24h -8.01%, liq ~$2.4M
-- USDC: $1.0000, 24h +0.01%, liq ~$499.6M
-- Portfolio: 13.7290 SOL cash, 0 open positions, realized PnL +0.0012 SOL.
-### Cycle 3559 | 2026-02-28T12:44:34.703Z
-- SOL: $79.0107, 24h -4.70%, liq ~$654.7M
-- JUP: $0.146298, 24h -5.11%, liq ~$2.9M
-- BONK: $0.0000055658, 24h -7.78%, liq ~$2.4M
-- USDC: $1.0000, 24h +0.01%, liq ~$499.5M
-- Portfolio: 13.7290 SOL cash, 0 open positions, realized PnL +0.0012 SOL.
-### Cycle 3560 | 2026-02-28T12:47:56.968Z
-- SOL: $78.7692, 24h -4.96%, liq ~$654.7M
-- JUP: $0.146366, 24h -5.00%, liq ~$2.9M
-- BONK: $0.0000055694, 24h -7.68%, liq ~$2.4M
-- USDC: $1.0000, 24h +0.00%, liq ~$500.1M
-- Portfolio: 13.7290 SOL cash, 0 open positions, realized PnL +0.0012 SOL.
+### 4001 (2026-03-01T06:43:13Z)
+- SOL: $86.31, 24h +9.39%, liq ~$681.77M
+- JUP: $0.1713, 24h +14.22%, liq ~$3.21M
+- Portfolio: 8.6849 SOL cash, JUP 2528.534356 (5 SOL cost), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4002 (2026-03-01T06:44:40.421Z)
+- SOL: $86.36, 24h +9.39%, liq ~$681.67M
+- JUP: $0.1717, 24h +14.31%, liq ~$3.21M
+- JTO: $0.2699, 24h +3.94%, liq ~$0.14M
+- Portfolio: 8.1849 SOL cash, JUP 2780.615083 (5.5 SOL cost), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4003 (2026-03-01T06:45:24.322Z)
+- SOL: $86.38, 24h +9.91%, liq ~$681.71M
+- JUP: $0.1717, 24h +14.16%, liq ~$3.21M
+- BONK: $0.00000602, 24h +5.41%, liq ~$2.49M
+- Portfolio: 8.1849 SOL cash, JUP 2780.615083 (5.5 SOL cost), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4004 (2026-03-01T06:47:11.411Z)
+- SOL: $86.30, 24h +10.03%, liq ~$681.35M
+- JUP: $0.1718, 24h +14.22%, liq ~$3.22M
+- JTO: $0.2693, 24h +4.07%, liq ~$141.60k
+- Portfolio: 8.0839 SOL cash, JUP 2830.924116 (5.60 SOL cost), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4005 (2026-03-01T06:48:59.271Z)
+- SOL: $86.38, 24h +9.98%, liq ~$681.38M
+- JUP: $0.1720, 24h +14.62%, liq ~$3.21M
+- JTO: $0.2693, 24h +4.07%, liq ~$141.60k
+- Portfolio: 7.5839 SOL cash, JUP 3082.124592 (6.60 SOL est. cost), SOL-PERP long 2x (size $18, collateral $9), USDC 28.04
+### 4006 (2026-03-01T06:51:00.250Z)
+- SOL: $86.50, 24h +11.05%, liq ~$681.23M
+- JUP: $0.1714, 24h +13.45%, liq ~$3.21M
+- BONK: $0.00000601, 24h +6.92%, liq ~$2.49M
+- JTO: $0.2693, 24h +4.06%, liq ~$141.60K
+- Portfolio: 7.0839 SOL cash, JUP 3334.280716 (6.60 SOL est. cost), SOL-PERP long 2x (size $18, collateral $9), USDC 28.04
+### 4007 (2026-03-01T06:52:24.650Z)
+- SOL: $86.67, 24h +11.12%, liq ~$681.42M
+- JUP: $0.1716, 24h +13.70%, liq ~$3.21M
+- JTO: $0.2701, 24h +4.11%, liq ~$141.60K
+- Portfolio: 6.5839 SOL cash, JUP 3586.112245, SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4008 (2026-03-01T06:54:16.899Z)
+- SOL: $86.75, 24h +11.58%, liq ~$681.62M
+- JUP: $0.1721, 24h +15.55%, liq ~$3.22M
+- BONK: $0.00000604, 24h +7.32%, liq ~$2.49M
+- JTO: $0.2701, 24h +4.11%, liq ~$141.60K
+- Portfolio: 6.0839 SOL cash, JUP 3837.937712 (cost 7.6 SOL), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4009 (2026-03-01T06:56:07.985Z)
+- SOL: $86.75, 24h +12.02%, liq ~$681.72M
+- JUP: $0.1721, 24h +16.65%, liq ~$3.22M
+- JTO: $0.2701, 24h +5.52%, liq ~$141.60K
+- Portfolio: 5.5839 SOL cash, JUP 4089.585045 (8.1 SOL cost), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4010 (2026-03-01T06:58:06.855Z)
+- SOL: $86.72, 24h +12.30%, liq ~$681.69M
+- JUP: $0.1718, 24h +17.84%, liq ~$3.22M
+- BONK: $0.00000603, 24h +6.96%, liq ~$2.49M
+- JTO: $0.2706, 24h +5.82%, liq ~$141.64K
+- Portfolio: 5.0839 SOL cash, JUP 4341.699419 (8.6 SOL cost), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4011 (2026-03-01T06:59:56.049Z)
+- SOL: $86.69, 24h +12.15%, liq ~$681.69M
+- JUP: $0.1726, 24h +18.37%, liq ~$3.22M
+- BONK: $0.00000603, 24h +7.99%, liq ~$2.49M
+- JTO: $0.2706, 24h +5.68%, liq ~$141.65K
+- Portfolio: 4.5839 SOL cash, 4593.681767 JUP (cost 9.1 SOL), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4012 (2026-03-01T07:01:51Z)
+- SOL: $86.62, 24h +11.51%, liq ~$681.78M
+- JUP: $0.1721, 24h +17.49%, liq ~$3.22M
+- JTO: $0.2693, 24h +4.86%, liq ~$141.60K
+- Portfolio: 4.0839 SOL cash, 4844.617173 JUP (cost 9.6 SOL), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4013 (2026-03-01T07:03:41Z)
+- SOL: $86.53, 24h +11.17%, liq ~$681.75M
+- JUP: $0.1722, 24h +18.29%, liq ~$3.22M
+- Portfolio: 3.5839 SOL cash, 5096.524713 JUP (cost 10.1 SOL), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4014 (2026-03-01T07:05:29.177Z)
+- SOL: $86.46, 24h +10.74%, liq ~$681.59M
+- JUP: $0.1715, 24h +17.62%, liq ~$3.22M
+- JTO: $0.2693, 24h +4.33%, liq ~$141.60K
+- Portfolio: 3.0839 SOL cash, 5348.037012 JUP (cost 10.6 SOL), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04
+### 4015 (2026-03-01T07:07:26.208Z)
+- SOL: $86.46, 24h +10.08%, liq ~$681.51M
+- JUP: $0.17147, 24h +17.32%, liq ~$3.22M
+- JTO: $0.2693, 24h +4.33%, liq ~$141.60K
+- Portfolio: 2.9839 SOL cash, 5398.432082 JUP (cost 10.7 SOL), SOL-PERP long 2x (size $18, collateral $9), USDC $28.04

@@ -2,12 +2,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
 import { createLogger } from "./logger.js";
-import { loadState, saveState, applyResult, applyPerpOpen, applyPerpClose, getSummary } from "./state.js";
+import { loadState, saveState, applyResult, applyPerpOpen, applyPerpClose, writeOffPerp, getSummary } from "./state.js";
 import type { State, TradeIntent } from "./state.js";
 import { getBalance, executeSwap, signAndSendTransaction } from "./wallet.js";
 import type { TradeOrder } from "./wallet.js";
-import { buildOpenPositionTx, buildClosePositionTx } from "./perps.js";
-import { checkStopLoss, checkPerpStopLoss, validateIntent } from "./safety.js";
+import { buildOpenPositionTx, buildClosePositionTx, buildInitializeUserTx, getUsdcBalanceUsd } from "./perps.js";
+import { checkStopLoss, checkPerpStopLoss, checkPerpWriteOffs, validateIntent } from "./safety.js";
 import { invokeCodex } from "./codex.js";
 import { startDashboard } from "./ui.js";
 
@@ -214,12 +214,25 @@ async function executePerpClose(state: State, intent: TradeIntent): Promise<void
         `Close ${market} ${pos.side} ${pos.leverage}x`
       );
       if (!result.success) {
-        log.warn(`[PerpFailed] ${market}: close tx failed: ${result.error}`);
+        // Track consecutive close failures for backoff
+        pos.closeFailCount = (pos.closeFailCount ?? 0) + 1;
+        pos.lastCloseFailedAt = new Date().toISOString();
+        const isCollateralError = result.error?.includes("InsufficientCollateral") || result.error?.includes("0x1773");
+        if (isCollateralError && pos.closeFailCount >= 3) {
+          log.error(`[PerpStuck] ${market}: InsufficientCollateral after ${pos.closeFailCount} attempts. Position may need manual intervention (deposit collateral via Drift UI or wait for liquidation). Backing off to 5-min retry.`);
+        } else {
+          log.warn(`[PerpFailed] ${market}: close tx failed: ${result.error}`);
+        }
         state.failedCount++;
         return;
       }
+      // Reset failure tracking on success
+      pos.closeFailCount = undefined;
+      pos.lastCloseFailedAt = undefined;
       log.info(`[PerpCloseTxSent] ${market} ${pos.side} tx=${result.txHash ?? "n/a"}`);
     } catch (e) {
+      pos.closeFailCount = (pos.closeFailCount ?? 0) + 1;
+      pos.lastCloseFailedAt = new Date().toISOString();
       log.warn(`[PerpFailed] ${market}: close tx build/send error: ${e instanceof Error ? e.message : String(e)}`);
       state.failedCount++;
       return;
@@ -299,7 +312,31 @@ async function runStopLossLoop(
         if (signal.aborted) break;
         await executeIntent(state, intent);
       }
-      if (intents.length > 0) {
+
+      // Write-off stuck perp positions
+      const writeOffMarkets = checkPerpWriteOffs(state);
+      for (const market of writeOffMarkets) {
+        const pos = state.perpPositions[market];
+        if (!pos) continue;
+        const { pnlUsd } = writeOffPerp(state, market);
+        log.warn(`[WriteOff] ${market} ${pos.side} ${pos.leverage}x: wrote off collateral=$${pos.collateralUsd.toFixed(2)}, pnl=$${pnlUsd.toFixed(2)} (failCount=${pos.closeFailCount ?? 0})`);
+        try {
+          await appendLedgerEvent("perp_write_off", {
+            market,
+            side: pos.side,
+            leverage: pos.leverage,
+            collateralUsd: pos.collateralUsd,
+            entryPriceUsd: pos.entryPriceUsd,
+            pnlUsd,
+            closeFailCount: pos.closeFailCount ?? 0,
+            reason: "stuck_position_write_off",
+          });
+        } catch (e) {
+          log.warn(`Ledger write failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      if (intents.length > 0 || writeOffMarkets.length > 0) {
         await saveState(state);
       }
     } catch (e) {
@@ -348,12 +385,31 @@ export async function runLoop(signal: AbortSignal): Promise<void> {
     await fs.writeFile(observationsPath, "# Market Observations\n\n## Summary\n\n(No compacted summaries yet)\n\n## Recent\n\n(No observations yet)\n");
   }
 
-  const strategyPath = path.resolve("strategy.md");
-  try { await fs.access(strategyPath); } catch {
-    await fs.writeFile(strategyPath, "# CashCat Trading Strategy\n\n(Codex reads and writes this file to evolve its trading strategy)\n(RULES: Only write durable rules and lessons here. Per-cycle market data goes in observations.md. Keep under 50 lines.)\n\n## Entry Rules\n\n## Exit Rules\n\n(The engine automatically handles stop-loss/take-profit/timeout)\n\n## Token Watchlist\n\n## Lessons Learned\n");
-  }
-
   startDashboard();
+
+  // Initialize Drift user account if perps are enabled and in real mode
+  if (config.perps.enabled && !config.perps.paperOnly && config.solanaWalletAddress) {
+    try {
+      const { PublicKey } = await import("@solana/web3.js");
+      const walletPubkey = new PublicKey(config.solanaWalletAddress);
+      const initTx = await buildInitializeUserTx(walletPubkey);
+      if (initTx) {
+        log.info("Drift user account not found, initializing...");
+        const result = await signAndSendTransaction(
+          `drift-init-${Date.now()}`,
+          initTx,
+          "Initialize Drift user account"
+        );
+        if (result.success) {
+          log.info(`Drift user account initialized: tx=${result.txHash ?? "n/a"}`);
+        } else {
+          log.warn(`Drift user account init failed: ${result.error}`);
+        }
+      }
+    } catch (e) {
+      log.warn(`Drift init check failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   const mutex = createMutex();
 
@@ -392,6 +448,19 @@ export async function runLoop(signal: AbortSignal): Promise<void> {
           }
         } catch {
           // getBalance failed — skip sync, continue with stale cashLamports
+        }
+
+        // Sync USDC balance → perpBalanceUsd (real mode only)
+        if (config.perps.enabled && !config.perps.paperOnly && config.solanaWalletAddress) {
+          try {
+            const { PublicKey } = await import("@solana/web3.js");
+            const walletPubkey = new PublicKey(config.solanaWalletAddress);
+            const usdcBalance = await getUsdcBalanceUsd(walletPubkey);
+            state.perpBalanceUsd = usdcBalance;
+            log.info(`USDC balance synced: $${usdcBalance.toFixed(2)}`);
+          } catch (e) {
+            log.warn(`USDC balance sync failed: ${e instanceof Error ? e.message : String(e)}`);
+          }
         }
 
         // Safety net: trim observations.md if it grew too large (Codex should compact, but may miss)

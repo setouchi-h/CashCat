@@ -45,6 +45,7 @@ export const config = {
   maxIntentsPerCycle: Math.max(1, Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_MAX_INTENTS_PER_CYCLE, 4))),
   initialCashSol: Math.max(0.1, parseNumber(process.env.RUNTIME_AGENTIC_INITIAL_CASH_SOL, 10)),
   statePath: parseOptional(process.env.RUNTIME_AGENTIC_STATE_PATH) ?? "/tmp/cashcat-runtime/agentic-state/state.json",
+  codexModel: parseOptional(process.env.RUNTIME_CODEX_MODEL) ?? "gpt-5.3-codex-spark",
   codexTimeoutSeconds: Math.max(30, Math.floor(parseNumber(process.env.RUNTIME_AGENTIC_CODEX_TIMEOUT_SECONDS, 120))),
   ledgerReadPath: parseOptional(process.env.WALLET_MCP_LEDGER_PATH) ?? "/tmp/cashcat-runtime/wallet-mcp/ledger.jsonl",
   dashboardPort: Number(process.env.DASHBOARD_PORT) || 8787,
@@ -63,5 +64,7 @@ export const config = {
     hourlyBorrowRate: 0.00001,
     liquidationThreshold: 0.002,
     paperOnly: process.env.RUNTIME_PERPS_PAPER_ONLY !== "false", // default paper
+    driftEnv: (process.env.RUNTIME_PERPS_DRIFT_ENV ?? "mainnet-beta") as string,
+    driftPollingIntervalMs: Math.max(1000, Math.floor(parseNumber(process.env.RUNTIME_PERPS_DRIFT_POLLING_MS, 10000))),
   },
 } as const;

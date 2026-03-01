@@ -42,6 +42,21 @@ interface Snapshot {
     openedAt: string;
     updatedAt: string;
   }>;
+  perpBalanceUsd: number;
+  realizedPerpPnlUsd: number;
+  perpPositions: Array<{
+    market: string;
+    side: string;
+    leverage: number;
+    sizeUsd: number;
+    collateralUsd: number;
+    entryPriceUsd: number;
+    markPriceUsd: number;
+    liquidationPriceUsd: number;
+    unrealizedPnlUsd: number;
+    borrowFeeUsd: number;
+    openedAt: string;
+  }>;
   recentLedger: Array<{
     timestamp?: string;
     type?: string;
@@ -214,12 +229,26 @@ async function loadSnapshot(): Promise<Snapshot> {
     // state file not yet created
   }
 
-  // Fetch live prices
-  const allMints = [SOL_MINT, ...positions.map((p) => p.mint).filter(Boolean)];
-  const prices = await fetchPricesUsd(allMints);
+  // Read perp state
+  const perpBalanceUsd = Number(state.perpBalanceUsd ?? 0) || 0;
+  const realizedPerpPnlUsd = Number(state.realizedPerpPnlUsd ?? 0) || 0;
+  const rawPerpPositions = state.perpPositions && typeof state.perpPositions === "object"
+    ? (state.perpPositions as Record<string, unknown>)
+    : {};
+
+  // Collect all mints we need prices for (spot + perp underlyings)
+  const perpEntries = Object.values(rawPerpPositions)
+    .filter((v) => v && typeof v === "object")
+    .map((v) => v as Record<string, unknown>);
+  const perpUnderlyingMints = perpEntries
+    .map((p) => typeof p.underlyingMint === "string" ? p.underlyingMint : "")
+    .filter(Boolean);
+
+  const allMints = [SOL_MINT, ...positions.map((p) => p.mint).filter(Boolean), ...perpUnderlyingMints];
+  const prices = await fetchPricesUsd([...new Set(allMints)]);
   const solPriceUsd = prices[SOL_MINT] ?? 0;
 
-  // Enrich positions with price data
+  // Enrich spot positions with price data
   for (const p of positions) {
     p.latestPriceUsd = prices[p.mint] ?? 0;
     p.marketValueUsd = p.quantity * p.latestPriceUsd;
@@ -227,11 +256,45 @@ async function loadSnapshot(): Promise<Snapshot> {
     p.unrealizedPnlUsd = p.marketValueUsd - p.costUsd;
   }
 
+  // Build perp positions with unrealized PnL
+  const nowMs = Date.now();
+  const hourlyBorrowRate = 0.0000125; // matches config default
+  const perpPositions: Snapshot["perpPositions"] = perpEntries.map((p) => {
+    const side = typeof p.side === "string" ? p.side : "long";
+    const entryPriceUsd = Number(p.entryPriceUsd ?? 0) || 0;
+    const sizeUsd = Number(p.sizeUsd ?? 0) || 0;
+    const collateralUsd = Number(p.collateralUsd ?? 0) || 0;
+    const underlyingMint = typeof p.underlyingMint === "string" ? p.underlyingMint : "";
+    const markPriceUsd = prices[underlyingMint] ?? 0;
+    const holdHours = Math.max(0, (nowMs - Date.parse(typeof p.openedAt === "string" ? p.openedAt : "")) / 3_600_000);
+    const borrowFeeUsd = sizeUsd * hourlyBorrowRate * holdHours;
+    let unrealizedPnlUsd = 0;
+    if (entryPriceUsd > 0 && markPriceUsd > 0) {
+      const priceChange = (markPriceUsd - entryPriceUsd) / entryPriceUsd;
+      const rawPnl = side === "long" ? sizeUsd * priceChange : sizeUsd * -priceChange;
+      unrealizedPnlUsd = rawPnl - borrowFeeUsd;
+    }
+    return {
+      market: typeof p.market === "string" ? p.market : "",
+      side,
+      leverage: Number(p.leverage ?? 1) || 1,
+      sizeUsd,
+      collateralUsd,
+      entryPriceUsd,
+      markPriceUsd,
+      liquidationPriceUsd: Number(p.liquidationPriceUsd ?? 0) || 0,
+      unrealizedPnlUsd,
+      borrowFeeUsd,
+      openedAt: typeof p.openedAt === "string" ? p.openedAt : "",
+    };
+  });
+
   const cashUsd = cashSol * solPriceUsd;
   const realizedUsd = realizedSol * solPriceUsd;
   const unrealizedUsd = positions.reduce((s, p) => s + p.unrealizedPnlUsd, 0);
+  const perpUnrealizedUsd = perpPositions.reduce((s, p) => s + p.unrealizedPnlUsd, 0);
   const positionValueUsd = positions.reduce((s, p) => s + p.marketValueUsd, 0);
-  const equityUsd = cashUsd + positionValueUsd;
+  const equityUsd = cashUsd + positionValueUsd + perpBalanceUsd + perpUnrealizedUsd;
   const initialEquityUsd = initialCashSol * solPriceUsd;
   const totalPnlUsd = equityUsd - initialEquityUsd;
   const totalPnlPct = initialEquityUsd > 0 ? (totalPnlUsd / initialEquityUsd) * 100 : 0;
@@ -255,6 +318,9 @@ async function loadSnapshot(): Promise<Snapshot> {
     failedCount,
     openPositions: positions.length,
     positions,
+    perpBalanceUsd,
+    realizedPerpPnlUsd,
+    perpPositions,
     recentLedger,
   };
 }
@@ -295,11 +361,12 @@ function htmlPage(): string {
     .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
     h1 { margin: 0 0 12px; font-size: 22px; }
     .sub { color: var(--muted); margin-bottom: 16px; font-size: 12px; }
+    .section { margin-bottom: 16px; }
+    .section-title { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; padding-left: 2px; }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
       gap: 10px;
-      margin-bottom: 12px;
     }
     .card {
       background: var(--panel);
@@ -307,8 +374,13 @@ function htmlPage(): string {
       border-radius: 10px;
       padding: 10px;
     }
+    .card-hero {
+      background: linear-gradient(135deg, #131f2b 0%, #1a2836 100%);
+      border: 1px solid #2a3f50;
+    }
     .k { color: var(--muted); font-size: 11px; margin-bottom: 3px; }
     .v { font-size: 18px; font-weight: 700; }
+    .v-lg { font-size: 24px; font-weight: 700; }
     .ok { color: var(--ok); }
     .danger { color: var(--danger); }
     .warn { color: var(--warn); }
@@ -340,13 +412,25 @@ function htmlPage(): string {
   <div class="wrap">
     <h1>CashCat Runtime Dashboard</h1>
     <div class="sub">Auto refresh: 3s | Endpoint: <span class="mono">/api/snapshot</span> | PnL is estimation from state + latest prices</div>
-    <div class="grid" id="metrics"></div>
+    <div id="overview" class="section"></div>
+    <div id="spot" class="section"></div>
+    <div id="perp" class="section"></div>
+    <div class="section">
+      <div class="section-title">Execution</div>
+      <div class="grid" id="execution"></div>
+    </div>
     <div class="row">
       <div class="card">
-        <div class="k">Positions</div>
+        <div class="k">Spot Positions</div>
         <div id="positions"></div>
       </div>
       <div class="card">
+        <div class="k">Perp Positions</div>
+        <div id="perpPositions"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="card" style="grid-column:1/-1">
         <div class="k">Recent Ledger</div>
         <div id="ledger"></div>
       </div>
@@ -360,27 +444,57 @@ function htmlPage(): string {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
-    function metricsHtml(s) {
+    function card(k, v, cls) {
+      return \`<div class="card"><div class="k">\${k}</div><div class="v \${cls || ""}">\${esc(v)}</div></div>\`;
+    }
+    function heroCard(k, v, cls) {
+      return \`<div class="card card-hero"><div class="k">\${k}</div><div class="v-lg \${cls || ""}">\${esc(v)}</div></div>\`;
+    }
+    function sectionHtml(title, cards) {
+      return \`<div class="section-title">\${title}</div><div class="grid">\${cards.join("")}</div>\`;
+    }
+    function overviewHtml(s) {
+      return sectionHtml("Overview", [
+        heroCard("Total Equity", "$" + fmt(s.equityUsd, 2)),
+        heroCard("Total PnL", "$" + money(s.totalPnlUsd), s.totalPnlUsd >= 0 ? "ok" : "danger"),
+        heroCard("PnL %", fmt(s.totalPnlPct, 2) + "%", s.totalPnlPct >= 0 ? "ok" : "danger"),
+        card("SOL Price", "$" + fmt(s.solPriceUsd, 4)),
+        card("Cycle", s.cycle),
+      ]);
+    }
+    function spotHtml(s) {
+      return sectionHtml("Spot", [
+        card("Cash", fmt(s.cashSol, 4) + " SOL  ($" + fmt(s.cashUsd, 2) + ")"),
+        card("Open Positions", s.openPositions),
+        card("Unrealized PnL", "$" + money(s.unrealizedUsd), s.unrealizedUsd >= 0 ? "ok" : "danger"),
+        card("Realized PnL", "$" + money(s.realizedUsd), s.realizedUsd >= 0 ? "ok" : "danger"),
+      ]);
+    }
+    function perpSectionHtml(s) {
+      const perpUnrealized = (s.perpPositions || []).reduce((sum, p) => sum + (p.unrealizedPnlUsd || 0), 0);
+      return sectionHtml("Perps", [
+        card("Balance", "$" + fmt(s.perpBalanceUsd, 2) + " USDC"),
+        card("Open Positions", (s.perpPositions || []).length),
+        card("Unrealized PnL", "$" + money(perpUnrealized), perpUnrealized >= 0 ? "ok" : "danger"),
+        card("Realized PnL", "$" + money(s.realizedPerpPnlUsd), s.realizedPerpPnlUsd >= 0 ? "ok" : "danger"),
+      ]);
+    }
+    function executionHtml(s) {
       return [
-        ["Cycle", s.cycle],
-        ["SOL Price (USD)", "$" + fmt(s.solPriceUsd, 4)],
-        ["Cash (SOL)", fmt(s.cashSol)],
-        ["Cash (USD)", "$" + fmt(s.cashUsd, 2)],
-        ["Realized (SOL)", fmt(s.realizedSol, 6), s.realizedSol >= 0 ? "ok" : "danger"],
-        ["Realized (USD)", "$" + money(s.realizedUsd), s.realizedUsd >= 0 ? "ok" : "danger"],
-        ["Unrealized (USD)", "$" + money(s.unrealizedUsd), s.unrealizedUsd >= 0 ? "ok" : "danger"],
-        ["Total PnL (USD)", "$" + money(s.totalPnlUsd), s.totalPnlUsd >= 0 ? "ok" : "danger"],
-        ["Total PnL (%)", fmt(s.totalPnlPct, 2) + "%", s.totalPnlPct >= 0 ? "ok" : "danger"],
-        ["Equity (USD)", "$" + fmt(s.equityUsd, 2)],
-        ["Open Positions", s.openPositions],
-        ["Filled", s.filledCount, "ok"],
-        ["Failed", s.failedCount, s.failedCount > 0 ? "danger" : ""]
-      ].map(([k,v,cls]) => \`<div class="card"><div class="k">\${k}</div><div class="v \${cls || ""}">\${esc(v)}</div></div>\`).join("");
+        card("Filled", s.filledCount, "ok"),
+        card("Failed", s.failedCount, s.failedCount > 0 ? "danger" : ""),
+      ].join("");
     }
     function positionsHtml(items) {
       if (!items || items.length === 0) return '<div class="mini">No open positions</div>';
       return '<table><thead><tr><th>Symbol</th><th>Qty</th><th>Px(USD)</th><th>Value(USD)</th><th>Unrealized(USD)</th></tr></thead><tbody>' +
         items.map((p) => \`<tr><td>\${esc(p.symbol)}</td><td class="mono">\${fmt(p.quantity, 6)}</td><td>\$ \${fmt(p.latestPriceUsd, 6)}</td><td>\$ \${fmt(p.marketValueUsd, 2)}</td><td class="\${p.unrealizedPnlUsd >= 0 ? "ok" : "danger"}">\$ \${money(p.unrealizedPnlUsd)}</td></tr>\`).join("") +
+        "</tbody></table>";
+    }
+    function perpPositionsHtml(items) {
+      if (!items || items.length === 0) return '<div class="mini">No open perp positions</div>';
+      return '<table><thead><tr><th>Market</th><th>Side</th><th>Lev</th><th>Size($)</th><th>Entry</th><th>Mark</th><th>Liq</th><th>PnL($)</th></tr></thead><tbody>' +
+        items.map((p) => \`<tr><td>\${esc(p.market)}</td><td>\${esc(p.side)}</td><td>\${p.leverage}x</td><td>\$ \${fmt(p.sizeUsd, 2)}</td><td>\$ \${fmt(p.entryPriceUsd, 2)}</td><td>\$ \${fmt(p.markPriceUsd, 2)}</td><td>\$ \${fmt(p.liquidationPriceUsd, 2)}</td><td class="\${p.unrealizedPnlUsd >= 0 ? "ok" : "danger"}">\$ \${money(p.unrealizedPnlUsd)}</td></tr>\`).join("") +
         "</tbody></table>";
     }
     function ledgerHtml(items) {
@@ -393,8 +507,12 @@ function htmlPage(): string {
       try {
         const res = await fetch('/api/snapshot', { cache: 'no-store' });
         const s = await res.json();
-        document.getElementById('metrics').innerHTML = metricsHtml(s);
+        document.getElementById('overview').innerHTML = overviewHtml(s);
+        document.getElementById('spot').innerHTML = spotHtml(s);
+        document.getElementById('perp').innerHTML = perpSectionHtml(s);
+        document.getElementById('execution').innerHTML = executionHtml(s);
         document.getElementById('positions').innerHTML = positionsHtml(s.positions);
+        document.getElementById('perpPositions').innerHTML = perpPositionsHtml(s.perpPositions);
         document.getElementById('ledger').innerHTML = ledgerHtml(s.recentLedger);
       } catch (e) {
         document.getElementById('ledger').innerHTML = '<span class="danger">Failed to load snapshot</span>';
