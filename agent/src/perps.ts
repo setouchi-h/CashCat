@@ -86,6 +86,27 @@ export function getAvailableMarkets(): DriftMarketInfo[] {
   return Array.from(DRIFT_MARKETS.values());
 }
 
+/**
+ * Returns minimum order sizes (in base units) for all perp markets from on-chain data.
+ * Requires DriftClient to be initialized. Returns empty map if client is not ready.
+ */
+export function getMinOrderSizes(): Map<string, number> {
+  const result = new Map<string, number>();
+  if (!cachedDriftClient) return result;
+  for (const [name, info] of DRIFT_MARKETS) {
+    try {
+      const account = cachedDriftClient.getPerpMarketAccount(info.marketIndex);
+      if (account) {
+        const minSize = account.amm.minOrderSize.toNumber() / BASE_PRECISION.toNumber();
+        result.set(name, minSize);
+      }
+    } catch {
+      // skip
+    }
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // ReadOnly Wallet (satisfies Anchor Wallet interface for read-only DriftClient)
 // ---------------------------------------------------------------------------
@@ -211,6 +232,18 @@ export async function buildOpenPositionTx(
   const baseAssetAmount = new BN(
     Math.floor((sizeUsd / currentPriceUsd) * BASE_PRECISION.toNumber())
   );
+
+  // Check against Drift's on-chain minimum order size
+  const perpMarketAccount = client.getPerpMarketAccount(marketInfo.marketIndex);
+  if (perpMarketAccount) {
+    const minOrderSize = perpMarketAccount.amm.minOrderSize;
+    if (baseAssetAmount.lt(minOrderSize)) {
+      throw new Error(
+        `Order too small for ${resolved}: baseAssetAmount=${baseAssetAmount.toString()} < minOrderSize=${minOrderSize.toString()}. ` +
+        `Need at least $${((minOrderSize.toNumber() / BASE_PRECISION.toNumber()) * currentPriceUsd).toFixed(2)} notional.`
+      );
+    }
+  }
 
   const direction =
     side === "long" ? PositionDirection.LONG : PositionDirection.SHORT;

@@ -8,7 +8,7 @@ import { config } from "./config.js";
 import { createLogger } from "./logger.js";
 import { loginWithOAuth } from "./auth.js";
 import type { State, TradeIntent, PerpPosition } from "./state.js";
-import { getDriftMarket, getAvailableMarkets, resolveMarketName } from "./perps.js";
+import { getDriftMarket, getAvailableMarkets, getMinOrderSizes, resolveMarketName } from "./perps.js";
 
 const log = createLogger("codex");
 const execFileAsync = promisify(execFile);
@@ -232,7 +232,7 @@ async function ensureCodexAuth(sourceHome: string): Promise<void> {
   try {
     const raw = await fs.readFile(authPath, "utf8");
     const data = JSON.parse(raw) as CodexAuthFile;
-    if (data.tokens?.access_token && data.tokens?.refresh_token) {
+    if (data.tokens?.access_token && data.tokens?.refresh_token && data.tokens?.id_token) {
       return; // auth exists
     }
     log.info("Codex auth.json is incomplete. Re-authenticating...");
@@ -248,6 +248,7 @@ async function ensureCodexAuth(sourceHome: string): Promise<void> {
     tokens: {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
+      id_token: tokens.id_token,
     },
     last_refresh: new Date().toISOString(),
   };
@@ -293,11 +294,24 @@ function buildPerpPromptSection(state: State): string {
   const availableMarkets = getAvailableMarkets();
   const marketList = availableMarkets.map((m) => m.symbol).join(", ");
 
+  // Build min order size info from on-chain data
+  const minOrderSizes = getMinOrderSizes();
+  const minOrderSizeLines: string[] = [];
+  for (const m of availableMarkets) {
+    const minSize = minOrderSizes.get(m.symbol);
+    if (minSize != null && minSize > 0) {
+      minOrderSizeLines.push(`  ${m.symbol}: ${minSize} base units`);
+    }
+  }
+  const minOrderSizeSection = minOrderSizeLines.length > 0
+    ? `\nMinimum order sizes (from Drift on-chain):\n${minOrderSizeLines.join("\n")}\nYou MUST ensure collateral * leverage / price >= min order size for the market. If your USDC balance is too small to meet the minimum, do NOT attempt perp_open.\n`
+    : "";
+
   return `== Perpetual Futures (Drift Protocol) ==
 Available Drift Perp Markets: ${marketList}
 Aliases: BONK-PERP → 1MBONK-PERP, PEPE-PERP → 1MPEPE-PERP, WEN-PERP → 1MWEN-PERP
 You do NOT need to provide mint addresses for perp trades — the engine resolves them automatically from the market name.
-Max leverage: ${config.perps.maxLeverage}x
+${minOrderSizeSection}Max leverage: ${config.perps.maxLeverage}x
 Max open perps: ${config.perps.maxOpenPerps}
 Max collateral per position: ${(config.perps.maxCollateralPct * 100).toFixed(0)}% of perp balance
 Open/close fee: ${(config.perps.openCloseFeeRate * 100).toFixed(3)}% of notional

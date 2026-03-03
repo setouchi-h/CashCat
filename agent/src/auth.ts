@@ -22,6 +22,7 @@ const TOKEN_FILE = path.join(
 export interface StoredTokens {
   access_token: string;
   refresh_token: string;
+  id_token: string;
   expires_at: number;
 }
 
@@ -84,12 +85,14 @@ async function exchangeCode(
   const data = (await res.json()) as {
     access_token: string;
     refresh_token: string;
+    id_token: string;
     expires_in: number;
   };
 
   return {
     access_token: data.access_token,
     refresh_token: data.refresh_token,
+    id_token: data.id_token ?? "",
     expires_at: Date.now() + data.expires_in * 1000,
   };
 }
@@ -114,12 +117,14 @@ async function refreshAccessToken(refreshToken: string): Promise<StoredTokens> {
   const data = (await res.json()) as {
     access_token: string;
     refresh_token: string;
+    id_token: string;
     expires_in: number;
   };
 
   return {
     access_token: data.access_token,
     refresh_token: data.refresh_token,
+    id_token: data.id_token ?? "",
     expires_at: Date.now() + data.expires_in * 1000,
   };
 }
