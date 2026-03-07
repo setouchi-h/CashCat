@@ -86,21 +86,26 @@ function makeIntentId(symbol: string, action: "buy" | "sell"): string {
   return `agentic-${Date.now()}-${symbol.toLowerCase()}-${action}-${randomUUID().slice(0, 6)}`;
 }
 
+// Reserve for tx fees + ATA rent (priority fee + base fee + potential ATA creation)
+const FEE_RESERVE_LAMPORTS = 10_000_000n; // 0.01 SOL
+
 function calcBuyLamports(cashLamports: bigint): bigint {
-  if (cashLamports <= 0n) return 0n;
+  if (cashLamports <= FEE_RESERVE_LAMPORTS) return 0n;
+  const spendable = cashLamports - FEE_RESERVE_LAMPORTS;
   const minLamports = BigInt(Math.floor(config.minTradeSol * 1_000_000_000));
-  if (cashLamports < minLamports) return 0n;
-  return cashLamports;
+  if (spendable < minLamports) return 0n;
+  return spendable;
 }
 
 function normalizeBuyLamports(requested: unknown, cashLamports: bigint): bigint {
   const minLamports = BigInt(Math.floor(config.minTradeSol * 1_000_000_000));
+  const spendable = cashLamports > FEE_RESERVE_LAMPORTS ? cashLamports - FEE_RESERVE_LAMPORTS : 0n;
 
   const requestedInt = toPositiveInteger(requested);
   let amount = requestedInt !== null ? BigInt(requestedInt) : calcBuyLamports(cashLamports);
 
   if (amount < minLamports) amount = minLamports;
-  if (amount > cashLamports) amount = cashLamports;
+  if (amount > spendable) amount = spendable;
   if (amount < minLamports) return 0n;
   return amount;
 }
