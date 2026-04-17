@@ -1,9 +1,8 @@
-import { execFile, type ExecFileException } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import { config } from "./config.js";
 import { createLogger } from "./logger.js";
 import { loginWithOAuth } from "./auth.js";
@@ -11,7 +10,6 @@ import type { State, TradeIntent, PerpPosition } from "./state.js";
 import { getDriftMarket, getAvailableMarkets, getMinOrderSizes, resolveMarketName } from "./perps.js";
 
 const log = createLogger("codex");
-const execFileAsync = promisify(execFile);
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
@@ -445,26 +443,42 @@ async function runCodexExec(
   outputPath: string,
   timeoutMs: number
 ): Promise<CodexOutput> {
-  try {
-    await execFileAsync(
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(
       "codex",
       ["exec", "--full-auto", "-c", "sandbox_workspace_write.network_access=true", "--skip-git-repo-check", "-o", outputPath, prompt],
       {
         cwd: process.cwd(),
         env: { ...process.env, CODEX_HOME: codexHome },
-        timeout: timeoutMs,
-        maxBuffer: 8 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "pipe"],
       }
     );
-  } catch (e) {
-    const err = e as ExecFileException & { stdout?: string; stderr?: string };
-    const detail =
-      (err.stderr ?? "").trim() ||
-      (err.stdout ?? "").trim() ||
-      err.message ||
-      String(e);
-    throw new Error(`codex exec failed: ${summarizeCodexExecError(detail)}`);
-  }
+
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error(`codex exec timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve();
+      } else {
+        const detail = stderr.trim() || `exit code ${code}`;
+        reject(new Error(`codex exec failed: ${summarizeCodexExecError(detail)}`));
+      }
+    });
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(new Error(`codex exec failed: ${err.message}`));
+    });
+  });
 
   const outputText = (await fs.readFile(outputPath, "utf8")).trim();
   if (!outputText) {

@@ -424,3 +424,42 @@ export async function getUsdcBalanceUsd(walletPubkey: PublicKey): Promise<number
     return 0;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Public API — getAllSplTokenBalances
+// Returns the raw balance (as string) for every SPL token account owned by
+// the wallet. Used by the main loop to reconcile state.positions with
+// on-chain reality, catching desyncs caused by Drift collateral flows,
+// airdrops, or stale accounting.
+// ---------------------------------------------------------------------------
+
+export interface SplTokenBalance {
+  mint: string;
+  rawAmount: string;
+  decimals: number;
+}
+
+export async function getAllSplTokenBalances(
+  walletPubkey: PublicKey
+): Promise<SplTokenBalance[]> {
+  const connection = getConnection();
+  const resp = await connection.getParsedTokenAccountsByOwner(walletPubkey, {
+    programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+  });
+
+  const balances: SplTokenBalance[] = [];
+  for (const { account } of resp.value) {
+    const parsed = account.data.parsed as {
+      info?: {
+        mint?: string;
+        tokenAmount?: { amount?: string; decimals?: number };
+      };
+    };
+    const info = parsed?.info;
+    if (!info?.mint) continue;
+    const rawAmount = info.tokenAmount?.amount ?? "0";
+    const decimals = info.tokenAmount?.decimals ?? 0;
+    balances.push({ mint: info.mint, rawAmount, decimals });
+  }
+  return balances;
+}

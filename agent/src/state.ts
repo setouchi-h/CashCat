@@ -396,6 +396,89 @@ export function applyPerpClose(
   return { pnlUsd };
 }
 
+// ---------------------------------------------------------------------------
+// reconcileSpotPositions — sync state.positions[*].rawAmount with on-chain
+// balances. USDC is special: it's consumed by Drift as perp collateral
+// outside the swap ledger, so its rawAmount drifts until reconciled.
+// Other positions can also desync from airdrops, rewards, or prior state
+// write failures. We update rawAmount to truth; costLamports is scaled
+// proportionally when the balance shrinks so the remaining cost basis
+// stays consistent for the remaining tokens.
+// ---------------------------------------------------------------------------
+
+export interface ReconcileInput {
+  mint: string;
+  rawAmount: string;
+}
+
+export interface ReconcileDiff {
+  mint: string;
+  symbol: string;
+  beforeRaw: string;
+  afterRaw: string;
+  action: "updated" | "deleted";
+}
+
+export function reconcileSpotPositions(
+  state: State,
+  onChain: ReconcileInput[]
+): ReconcileDiff[] {
+  const diffs: ReconcileDiff[] = [];
+  const onChainByMint = new Map<string, bigint>();
+  for (const row of onChain) {
+    onChainByMint.set(row.mint, toBigint(row.rawAmount));
+  }
+
+  for (const [mint, pos] of Object.entries(state.positions)) {
+    const actual = onChainByMint.get(mint) ?? 0n;
+    const claimed = toBigint(pos.rawAmount);
+    if (actual === claimed) continue;
+
+    const beforeRaw = claimed.toString();
+
+    if (actual <= 0n) {
+      // Position fully drained on-chain — delete it. Treat the claimed
+      // balance as a realized loss in lamports (cost becomes unrecoverable).
+      delete state.positions[mint];
+      diffs.push({
+        mint,
+        symbol: pos.symbol,
+        beforeRaw,
+        afterRaw: "0",
+        action: "deleted",
+      });
+      continue;
+    }
+
+    const costLamports = toBigint(pos.costLamports);
+    let nextCost: bigint;
+    if (claimed > 0n && actual < claimed) {
+      // Shrink cost proportionally so realized-loss accounting stays sane.
+      nextCost = (costLamports * actual) / claimed;
+    } else {
+      // Balance grew (airdrop, rewards, earlier buy not reflected) — keep
+      // original cost; extra tokens are treated as zero-cost basis.
+      nextCost = costLamports;
+    }
+
+    state.positions[mint] = {
+      ...pos,
+      rawAmount: actual.toString(),
+      costLamports: nextCost.toString(),
+      updatedAt: new Date().toISOString(),
+    };
+    diffs.push({
+      mint,
+      symbol: pos.symbol,
+      beforeRaw,
+      afterRaw: actual.toString(),
+      action: "updated",
+    });
+  }
+
+  return diffs;
+}
+
 export function writeOffPerp(
   state: State,
   market: string

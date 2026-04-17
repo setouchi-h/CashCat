@@ -2,11 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
 import { createLogger } from "./logger.js";
-import { loadState, saveState, applyResult, applyPerpOpen, applyPerpClose, writeOffPerp, getSummary } from "./state.js";
+import { loadState, saveState, applyResult, applyPerpOpen, applyPerpClose, writeOffPerp, reconcileSpotPositions, getSummary } from "./state.js";
 import type { State, TradeIntent } from "./state.js";
 import { getBalance, executeSwap, signAndSendTransaction } from "./wallet.js";
 import type { TradeOrder } from "./wallet.js";
-import { buildOpenPositionTx, buildClosePositionTx, buildInitializeUserTx, getUsdcBalanceUsd } from "./perps.js";
+import { buildOpenPositionTx, buildClosePositionTx, buildInitializeUserTx, getUsdcBalanceUsd, getAllSplTokenBalances } from "./perps.js";
 import { checkStopLoss, checkPerpStopLoss, checkPerpWriteOffs, validateIntent } from "./safety.js";
 import { invokeCodex } from "./codex.js";
 import { startDashboard } from "./ui.js";
@@ -67,12 +67,22 @@ function createMutex(): Mutex {
 }
 
 // ---------------------------------------------------------------------------
-// Slippage error detection for swap retry logic
+// Swap error classification for retry logic
 // ---------------------------------------------------------------------------
 
+// Jupiter error 0x1771 (6001) = SlippageToleranceExceeded — retry with halved amount
+// may help if the smaller size fits within available liquidity.
 function isSlippageError(error: string | undefined): boolean {
   if (!error) return false;
-  return /0x1788|SlippageToleranceExceeded|Slippage/i.test(error);
+  return /0x1771\b|SlippageToleranceExceeded/i.test(error);
+}
+
+// Jupiter error 0x1788 (6024) = InsufficientFunds — the wallet does not hold
+// enough of the input token. Halving the amount does not fix the underlying
+// desync; we must reconcile state with the on-chain balance instead.
+function isInsufficientFundsError(error: string | undefined): boolean {
+  if (!error) return false;
+  return /0x1788\b|InsufficientFunds/i.test(error);
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +125,17 @@ async function executeIntent(
 
   for (let retry = 1; retry <= retryCfg.maxRetries; retry++) {
     if (result.success) break;
+
+    // InsufficientFunds (0x1788) means the on-chain balance is smaller
+    // than our state believes. Halving the amount won't change that —
+    // bail out and let the next cycle's reconcile sync the truth.
+    if (isInsufficientFundsError(result.error)) {
+      log.warn(
+        `[Retry] ${intent.action.toUpperCase()} ${symbol}: insufficient funds on-chain — skipping retry, state will reconcile next cycle`
+      );
+      break;
+    }
+
     if (!isSlippageError(result.error)) break;
 
     const prevAmount = currentAmount;
@@ -482,16 +503,36 @@ export async function runLoop(signal: AbortSignal): Promise<void> {
           // getBalance failed — skip sync, continue with stale cashLamports
         }
 
-        // Sync USDC balance → perpBalanceUsd (real mode only)
-        if (config.perps.enabled && !config.perps.paperOnly && config.solanaWalletAddress) {
+        // Sync USDC balance → perpBalanceUsd AND reconcile spot positions
+        // with on-chain balances. Drift deposits/withdrawals move USDC
+        // outside of the swap ledger, so state.positions[USDC] silently
+        // drifts until we read truth from the chain here. Other SPL tokens
+        // can also desync from airdrops, rewards, or failed state writes.
+        if (config.solanaWalletAddress) {
           try {
             const { PublicKey } = await import("@solana/web3.js");
             const walletPubkey = new PublicKey(config.solanaWalletAddress);
-            const usdcBalance = await getUsdcBalanceUsd(walletPubkey);
-            state.perpBalanceUsd = usdcBalance;
-            log.info(`USDC balance synced: $${usdcBalance.toFixed(2)}`);
+            const splBalances = await getAllSplTokenBalances(walletPubkey);
+
+            if (config.perps.enabled && !config.perps.paperOnly) {
+              const usdc = splBalances.find(
+                (b) => b.mint === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+              );
+              const usdcBalance = usdc
+                ? Number(BigInt(usdc.rawAmount)) / 10 ** usdc.decimals
+                : 0;
+              state.perpBalanceUsd = usdcBalance;
+              log.info(`USDC balance synced: $${usdcBalance.toFixed(2)}`);
+            }
+
+            const diffs = reconcileSpotPositions(state, splBalances);
+            for (const d of diffs) {
+              log.info(
+                `[Reconcile] ${d.symbol} (${d.mint.slice(0, 8)}…): ${d.beforeRaw} → ${d.afterRaw} (${d.action})`
+              );
+            }
           } catch (e) {
-            log.warn(`USDC balance sync failed: ${e instanceof Error ? e.message : String(e)}`);
+            log.warn(`Balance sync failed: ${e instanceof Error ? e.message : String(e)}`);
           }
         }
 
